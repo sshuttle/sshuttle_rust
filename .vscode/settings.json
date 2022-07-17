@@ -1,12 +1,21 @@
 {
     "cSpell.words": [
         "addrinfo",
+        "addrtype",
+        "dport",
+        "familys",
+        "fconfig",
         "fport",
         "getaddrinfo",
+        "INET",
         "lport",
+        "PREROUTING",
         "reprs",
+        "rustfmt",
         "sockaddr",
         "socktype",
+        "sshuttle",
+        "Stdio",
         "subnetport",
         "SWIDTHS"
     ]
