@@ -7,6 +7,7 @@
         "fconfig",
         "fport",
         "getaddrinfo",
+        "getsockopt",
         "INET",
         "lport",
         "PREROUTING",

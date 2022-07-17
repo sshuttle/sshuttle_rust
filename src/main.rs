@@ -63,6 +63,7 @@ fn options_to_config(opt: &options::Options) -> Result<Config, ConfigError> {
         excludes,
         remote,
         listen: opt.listen.clone(),
+        socks_addr: opt.socks,
     };
 
     Ok(config)

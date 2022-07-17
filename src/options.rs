@@ -37,6 +37,10 @@ pub struct Options {
     //exclude this subnet (can be used more than once)
     #[clap(short, long)]
     pub exclude: Vec<Subnets>,
+
+    //exclude this subnet (can be used more than once)
+    #[clap(short, long, default_value = "127.0.0.1:1080")]
+    pub socks: SocketAddr,
 }
 
 pub fn parse() -> Options {
