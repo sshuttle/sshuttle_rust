@@ -405,6 +405,7 @@ dependencies = [
  "dns-lookup",
  "env_logger",
  "fast-socks5",
+ "libc",
  "log",
  "nix",
  "regex",

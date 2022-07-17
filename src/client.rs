@@ -1,10 +1,11 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::unix::prelude::AsRawFd;
 use std::{error::Error, fmt::Display, net::SocketAddr};
 
 use fast_socks5::client::Socks5Stream;
+
 use nix::sys::socket::getsockopt;
-use nix::sys::socket::sockopt::OriginalDst;
+use nix::sys::socket::sockopt::{Ip6tOriginalDst, OriginalDst};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::select;
@@ -326,7 +327,7 @@ async fn run_client(config: &Config) -> Result<(), ClientError> {
 
     // let firewall_config = FirewallConfig {
     //     filter_from_user: None,
-    //     familys,
+    //     familysg,
     // };
     // let firewall = crate::firewall::nat::NatFirewall::new();
     // let commands = firewall.setup_firewall(&firewall_config)?;
@@ -335,7 +336,8 @@ async fn run_client(config: &Config) -> Result<(), ClientError> {
     // commands.run_all().await?;
 
     let socks_addr = config.socks_addr;
-    for addr in &config.listen {
+    let listen = config.listen.clone();
+    for addr in listen {
         println!("listening on: {}", addr);
         let listener = TcpListener::bind(addr).await?;
 
@@ -346,22 +348,61 @@ async fn run_client(config: &Config) -> Result<(), ClientError> {
                 let mut local = socket;
                 let mut local_buf = [0; 1024];
 
-                let target = getsockopt(local.as_raw_fd(), OriginalDst).unwrap();
-                // let s: IpAddr = target.into();
+                // let mut x: Box<sockaddr>;
+                // let x_ptr: *mut sockaddr = &mut *x;
+                // let x_ptr: *mut libc::c_void = x_ptr as *mut libc::c_void;
+                // let mut size: Box<u32> = Box::new(mem::size_of::<sockaddr>() as u32);
+                // let size_ptr: *mut u32 = &mut *size;
+                // unsafe {
+                //     libc::getsockopt(local.as_raw_fd(), SOL_IP, SO_ORIGINAL_DST, x_ptr, size_ptr);
+                // }
+                // let a = getsockopt(local.as_raw_fd(), OriginalDst).unwrap();
+                // let b = getsockopt(local.as_raw_fd(), Ip6tOriginalDst).unwrap();
+
+                // let target = getsockopt(local.as_raw_fd(), OriginalDst).unwrap();
+                // let s = target.sin_addr;
+
+                // let i8slice = a.sin6_addr.s6_addr;
+                // let u8slice = unsafe { &*(i8slice as *const _  as *const [u8; 14]) };
+                // let u8slice = &u8slice[0..4];
+
+                let (addr, port) = match addr {
+                    SocketAddr::V4(_) => {
+                        // let u8: [u8; 4];
+                        // u8.clone_from_slice(&u8slice[0..4]);
+                        let a = getsockopt(local.as_raw_fd(), OriginalDst).unwrap();
+                        (
+                            Ipv4Addr::from(u32::from_be(a.sin_addr.s_addr)).to_string(),
+                            a.sin_port.to_be(),
+                        )
+                    }
+                    SocketAddr::V6(_) => {
+                        let a = getsockopt(local.as_raw_fd(), Ip6tOriginalDst).unwrap();
+                        // let u8: [u8; 16];
+                        // u8.clone_from_slice(&u8slice[0..16]);
+                        println!("-------> {:x?}", a.sin6_addr.s6_addr);
+                        let mut b = a.sin6_addr.s6_addr;
+
+                        // let u16 = unsafe { &mut *(b as *mut _ as *mut [u16; 3]) };
+                        let u16 =
+                            unsafe { std::slice::from_raw_parts_mut(b.as_mut_ptr() as *mut u8, 8) };
+                        for i in u16.iter_mut() {
+                            *i = i.to_be();
+                        }
+
+                        (Ipv6Addr::from(b).to_string(), a.sin6_port.to_be())
+                    }
+                };
+
                 // let target_ip: String = inet_ntoa(&target.sin_addr).to_string();
-                // println!("target ip: {}", target_ip);
-                let target_port: u16 = target.sin_port;
+                println!("-----> target ip: [{addr}]:{port}");
+                // let target_port: u16 = x.sin_port;
                 let mut remote_config = fast_socks5::client::Config::default();
                 remote_config.set_skip_auth(true);
 
-                let mut remote = Socks5Stream::connect(
-                    socks_addr,
-                    "195.201.220.110".to_string(),
-                    target_port,
-                    remote_config,
-                )
-                .await
-                .unwrap();
+                let mut remote = Socks5Stream::connect(socks_addr, addr, port, remote_config)
+                    .await
+                    .unwrap();
                 let mut remote_buf = [0; 1024];
 
                 let mut shutdown_local: bool = false;
