@@ -113,14 +113,10 @@ pub async fn main(config: &Config) -> Result<(), ClientError> {
 }
 
 async fn run_everything(config: &Config) -> Result<(), ClientError> {
-    let ssh_connection = if let Some(remote) = &config.remote {
-        Some(run_ssh(config, remote.to_string()).await?)
-    } else {
-        None
-    };
     let client = run_client(config);
 
-    if let Some(c) = ssh_connection {
+    if let Some(remote) = &config.remote {
+        let c = run_ssh(config, remote.to_string()).await?;
         let ssh_handle = c.handle;
 
         tokio::pin!(ssh_handle);
