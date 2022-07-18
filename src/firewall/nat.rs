@@ -2,7 +2,7 @@ use crate::network::Ports;
 use crate::network::SubnetFamily;
 use crate::network::SubnetsFamily;
 
-use super::{Commands, Firewall, FirewallConfig, FirewallError, FirewallFamilyConfig};
+use super::{Commands, Firewall, FirewallConfig, FirewallError, FirewallSubnetConfig};
 
 pub struct NatFirewall {}
 
@@ -15,7 +15,7 @@ impl NatFirewall {
     fn setup_family<T: SubnetsFamily>(
         &self,
         config: &FirewallConfig,
-        fconfig: &FirewallFamilyConfig<T>,
+        fconfig: &FirewallSubnetConfig<T>,
         commands: &mut Commands,
     ) -> Result<(), FirewallError> {
         let port = fconfig.port.to_string();
@@ -92,7 +92,7 @@ impl NatFirewall {
     fn restore_family<T: SubnetsFamily>(
         &self,
         config: &FirewallConfig,
-        fconfig: &FirewallFamilyConfig<T>,
+        fconfig: &FirewallSubnetConfig<T>,
         commands: &mut Commands,
     ) -> Result<(), FirewallError> {
         let port = fconfig.port.to_string();
@@ -132,12 +132,12 @@ impl Firewall for NatFirewall {
     fn setup_firewall(&self, config: &FirewallConfig) -> Result<Commands, FirewallError> {
         let mut commands: Commands = self.restore_firewall(config)?;
 
-        for family in &config.familys {
+        for family in &config.listeners {
             match family {
-                super::FirewallAnyConfig::Ipv4(ip) => {
+                super::FirewallListenerConfig::Ipv4(ip) => {
                     self.setup_family(config, ip, &mut commands)?
                 }
-                super::FirewallAnyConfig::Ipv6(ip) => {
+                super::FirewallListenerConfig::Ipv6(ip) => {
                     self.setup_family(config, ip, &mut commands)?
                 }
             }
@@ -148,12 +148,12 @@ impl Firewall for NatFirewall {
     fn restore_firewall(&self, config: &FirewallConfig) -> Result<Commands, FirewallError> {
         let mut commands: Commands = Commands::default();
 
-        for family in &config.familys {
+        for family in &config.listeners {
             match family {
-                super::FirewallAnyConfig::Ipv4(ip) => {
+                super::FirewallListenerConfig::Ipv4(ip) => {
                     self.restore_family(config, ip, &mut commands)?
                 }
-                super::FirewallAnyConfig::Ipv6(ip) => {
+                super::FirewallListenerConfig::Ipv6(ip) => {
                     self.restore_family(config, ip, &mut commands)?
                 }
             }
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn test_setup_family_v4() {
         let firewall = NatFirewall::new();
-        let ipv4_family = FirewallFamilyConfig {
+        let ipv4_family = FirewallSubnetConfig {
             enable: true,
             port: 1025,
             includes: "1.2.3.0/24:8000-9000".parse::<SubnetsV4>().unwrap(),
@@ -183,7 +183,7 @@ mod tests {
         };
         let config = FirewallConfig {
             filter_from_user: None,
-            familys: vec![],
+            listeners: vec![],
         };
 
         let expected_ipv4: [&str; 7] = [
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn test_setup_family_v6() {
         let firewall = NatFirewall::new();
-        let ipv6_family = FirewallFamilyConfig {
+        let ipv6_family = FirewallSubnetConfig {
             enable: true,
             port: 1024,
             includes: "2404:6800:4004:80c::/64".parse::<SubnetsV6>().unwrap(),
@@ -219,7 +219,7 @@ mod tests {
         };
         let config = FirewallConfig {
             filter_from_user: None,
-            familys: vec![],
+            listeners: vec![],
         };
         let expected_ipv6: [&str; 7] = [
             "ip6tables -w -t nat -N sshuttle-1024",
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn test_restore_family_v4() {
         let firewall = NatFirewall::new();
-        let ipv4_family = FirewallFamilyConfig {
+        let ipv4_family = FirewallSubnetConfig {
             enable: true,
             port: 1024,
             includes: "1.2.3.0/32".parse::<SubnetsV4>().unwrap(),
@@ -254,7 +254,7 @@ mod tests {
         };
         let config = FirewallConfig {
             filter_from_user: None,
-            familys: vec![],
+            listeners: vec![],
         };
 
         let expected_ipv4: [&str; 4] = [
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn test_restore_family_v6() {
         let firewall = NatFirewall::new();
-        let ipv6_family = FirewallFamilyConfig {
+        let ipv6_family = FirewallSubnetConfig {
             enable: true,
             port: 1024,
             includes: "2404:6800:4004:80c::/64".parse::<SubnetsV6>().unwrap(),
@@ -287,7 +287,7 @@ mod tests {
         };
         let config = FirewallConfig {
             filter_from_user: None,
-            familys: vec![],
+            listeners: vec![],
         };
         let expected_ipv6: [&str; 4] = [
             "ip6tables -w -t nat -D OUTPUT -j sshuttle-1024",

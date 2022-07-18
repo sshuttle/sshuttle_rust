@@ -18,7 +18,7 @@ use tokio::{process::Command, spawn, task::JoinHandle};
 use crate::command::CommandError;
 use crate::commands::Commands;
 use crate::firewall::{
-    Firewall, FirewallAnyConfig, FirewallConfig, FirewallError, FirewallFamilyConfig,
+    Firewall, FirewallConfig, FirewallError, FirewallListenerConfig, FirewallSubnetConfig,
 };
 use crate::network::Subnets;
 
@@ -221,13 +221,13 @@ async fn start_firewall(config: &Config) -> Result<Commands, ClientError> {
         .listen
         .iter()
         .map(|addr| match addr.ip() {
-            IpAddr::V4(_) => FirewallAnyConfig::Ipv4(FirewallFamilyConfig {
+            IpAddr::V4(_) => FirewallListenerConfig::Ipv4(FirewallSubnetConfig {
                 enable: true,
                 port: addr.port(),
                 includes: config.includes.ipv4(),
                 excludes: config.excludes.ipv4(),
             }),
-            IpAddr::V6(_) => FirewallAnyConfig::Ipv6(FirewallFamilyConfig {
+            IpAddr::V6(_) => FirewallListenerConfig::Ipv6(FirewallSubnetConfig {
                 enable: true,
                 port: addr.port(),
                 includes: config.includes.ipv6(),
@@ -238,7 +238,7 @@ async fn start_firewall(config: &Config) -> Result<Commands, ClientError> {
 
     let firewall_config = FirewallConfig {
         filter_from_user: None,
-        familys,
+        listeners: familys,
     };
     let firewall = crate::firewall::nat::NatFirewall::new();
     let commands = firewall.setup_firewall(&firewall_config)?;

@@ -26,26 +26,26 @@ pub trait Firewall {
     fn restore_firewall(&self, config: &FirewallConfig) -> Result<Commands, FirewallError>;
 }
 
-pub struct FirewallFamilyConfig<T: SubnetsFamily> {
+pub struct FirewallSubnetConfig<T: SubnetsFamily> {
     pub enable: bool,
     pub port: u16,
     pub includes: T,
     pub excludes: T,
 }
 
-impl<T: SubnetsFamily> FirewallFamilyConfig<T> {
+impl<T: SubnetsFamily> FirewallSubnetConfig<T> {
     pub fn family(&self) -> Family {
         self.includes.family()
     }
 }
 
-pub enum FirewallAnyConfig {
-    Ipv4(FirewallFamilyConfig<SubnetsV4>),
-    Ipv6(FirewallFamilyConfig<SubnetsV6>),
+pub enum FirewallListenerConfig {
+    Ipv4(FirewallSubnetConfig<SubnetsV4>),
+    Ipv6(FirewallSubnetConfig<SubnetsV6>),
 }
 
 #[derive(Default)]
 pub struct FirewallConfig {
     pub filter_from_user: Option<String>,
-    pub familys: Vec<FirewallAnyConfig>,
+    pub listeners: Vec<FirewallListenerConfig>,
 }
