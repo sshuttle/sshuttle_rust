@@ -10,6 +10,7 @@
         "getsockopt",
         "INET",
         "lport",
+        "noncommercially",
         "PREROUTING",
         "reprs",
         "rustfmt",
@@ -18,6 +19,7 @@
         "sshuttle",
         "Stdio",
         "subnetport",
-        "SWIDTHS"
+        "SWIDTHS",
+        "TPROXY"
     ]
 }
