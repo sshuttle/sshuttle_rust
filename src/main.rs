@@ -56,6 +56,43 @@ fn options_to_config(opt: &options::Options) -> Result<Config, ConfigError> {
         });
     }
 
+    let num_ipv4_listen = opt.listen.iter().filter(|l| l.is_ipv4()).count();
+    if num_ipv4_listen > 1 {
+        return Err(ConfigError {
+            message: "Multiple IPv4 listeners specified".to_string(),
+        });
+    }
+
+    let num_ipv6_listen = opt.listen.iter().filter(|l| l.is_ipv6()).count();
+    if num_ipv6_listen > 1 {
+        return Err(ConfigError {
+            message: "Multiple IPv6 listeners specified".to_string(),
+        });
+    }
+
+    if num_ipv4_listen == 0 && num_ipv6_listen == 0 {
+        return Err(ConfigError {
+            message: "No IPv4 or IPv6 listeners specified".to_string(),
+        });
+    }
+
+    let ipv4_includes = includes.count_ipv4();
+    let ipv4_excludes = excludes.count_ipv4();
+    let ipv6_includes = includes.count_ipv6();
+    let ipv6_excludes = excludes.count_ipv6();
+
+    if (ipv4_includes > 0 || ipv4_excludes > 0) && num_ipv4_listen == 0 {
+        return Err(ConfigError {
+            message: "IPv4 subnets supplied but not enabled".to_string(),
+        });
+    }
+
+    if (ipv6_includes > 0 || ipv6_excludes > 0) && num_ipv6_listen == 0 {
+        return Err(ConfigError {
+            message: "IPv6 subnets supplied but not enabled".to_string(),
+        });
+    }
+
     let remote = opt.remote.to_string();
 
     let config = Config {

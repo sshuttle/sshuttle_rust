@@ -99,14 +99,20 @@ pub struct Subnets(pub Vec<Subnet>);
 #[derive(Debug, Default)]
 pub struct SubnetsV4(pub Vec<SubnetV4>);
 
-// impl SubnetsV4 {
-//     pub fn new() -> Self {
-//         SubnetsV4(Vec::new())
-//     }
-// }
+impl SubnetsV4 {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct SubnetsV6(pub Vec<SubnetV6>);
+
+impl SubnetsV6 {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
 
 impl Subnets {
     pub fn new(subnets: Vec<Subnet>) -> Self {
@@ -143,6 +149,17 @@ impl Subnets {
             })
             .collect();
         SubnetsV6(subnets)
+    }
+
+    pub fn count_ipv4(&self) -> usize {
+        self.ipv4().len()
+    }
+    pub fn count_ipv6(&self) -> usize {
+        self.ipv6().len()
+    }
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
