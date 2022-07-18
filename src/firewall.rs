@@ -44,15 +44,6 @@ pub enum FirewallAnyConfig {
     Ipv6(FirewallFamilyConfig<SubnetsV6>),
 }
 
-// impl FirewallAnyConfig {
-//     pub fn get_config<T: SubnetsFamily>(&self) -> &FirewallFamilyConfig<T> {
-//         match self {
-//             FirewallAnyConfig::Ipv4(config) => config,
-//             FirewallAnyConfig::Ipv6(config) => config,
-//         }
-//     }
-// }
-
 #[derive(Default)]
 pub struct FirewallConfig {
     pub filter_from_user: Option<String>,

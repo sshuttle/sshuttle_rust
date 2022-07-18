@@ -87,47 +87,31 @@ impl Error for ClientError {}
 pub async fn main(config: &Config) -> Result<(), ClientError> {
     let shutdown_commands = start_firewall(config).await?;
 
-    log::info!("aaaaaaaaaa");
-
     let (ssh_tx, ssh_handle) = run_ssh(config).await?;
-
-    log::info!("bbbbb");
 
     let client = run_client(config);
 
     tokio::pin!(ssh_handle);
     tokio::pin!(client);
 
-    // #[allow(unused_variables)]
-    // let mut ssh_tx = Some(ssh_tx);
-
-    // #[allow(unused_assignments)]
-    // loop {
-    log::info!("cccc");
     select! {
         res = &mut ssh_handle => {
             log::info!("ssh_handle finished");
             res??;
-            // break;
         },
         res = &mut client => {
             log::info!("client finished");
             res?;
-            // ssh_tx = None;
         },
         else => {
             log::info!("everything finished");
-            // break;
         }
     }
-    log::info!("cccc22222");
-    // }
 
     // We don't care if the message fails, probably because ssh already exited.
     _ = ssh_tx.send(Message::Shutdown).await;
-    log::info!("dddd {:?}", shutdown_commands);
 
-    println!("-------> {:#?}", shutdown_commands);
+    println!("{:#?}", shutdown_commands);
     shutdown_commands.run_all().await?;
 
     log::info!("eeee");

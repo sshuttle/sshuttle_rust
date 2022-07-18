@@ -28,6 +28,10 @@ Known bugs:
 
 * After starting process, initial connections will be rejected because ssh hasn't started yet.
 * Some servers may support running remote programs, but might disallow -D port forwarding. These won't work yet.
+* Can specify IPv6 subnets but not add IPv6 listener; this should cause an error.
+* Probably doesn't make sense to support multiple IPv4 listeners and multiple IPv6 listeners. The firewall code can only support one port for address family.
+* Shutdown of run_client code could be a bit cleaner.
+* Probably many others.
 
 ## Usage
 

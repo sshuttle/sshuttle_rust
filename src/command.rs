@@ -9,23 +9,6 @@ use tokio::process::Command;
 
 use crate::duration::duration_string;
 
-// #[derive(Debug)]
-// pub enum CommandResult {
-//     Success(String, String),
-//     Error(i32, String, String),
-//     FailedToStart(String),
-// }
-
-// impl CommandResult {
-//     pub fn has_errors(&self) -> bool {
-//         match self {
-//             CommandResult::Success(_stdout, _stderr) => false,
-//             CommandResult::Error(_rc, _stdout, _stderr) => true,
-//             CommandResult::FailedToStart(_) => true,
-//         }
-//     }
-// }
-
 pub struct CommandSuccess {
     pub cmd: CommandLine,
     pub stdout: String,
@@ -76,52 +59,6 @@ impl Display for CommandError {
 }
 
 impl Error for CommandError {}
-
-// #[derive(Debug)]
-// pub struct CommandStatus(pub CommandLine, pub CommandResult, pub Duration);
-
-// impl CommandStatus {
-//     pub fn has_errors(&self) -> bool {
-//         let CommandStatus(_cmd, result, _duration) = self;
-//         result.has_errors()
-//     }
-
-//     pub fn get_result_line(&self) -> String {
-//         match &self.1 {
-//             CommandResult::Success(_, _) => "Command was successful".to_string(),
-//             CommandResult::Error(rc, _, _) => format!("Command returned {rc}"),
-//             CommandResult::FailedToStart(err) => {
-//                 format!("Command failed to start: {err}")
-//             }
-//         }
-//     }
-// }
-
-// impl Display for CommandStatus {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         let CommandStatus(cmd, result, duration) = self;
-
-//         writeln!(f, "Result: {}", self.get_result_line())?;
-//         writeln!(f, "Duration: {}", duration_string(duration))?;
-
-//         match result {
-//             CommandResult::Success(stdout, stderr) => {
-//                 writeln!(f, "cmd: {}", cmd)?;
-//                 writeln!(f, "stdout:\n\n{}\n", stdout)?;
-//                 writeln!(f, "stderr:\n\n{}\n", stderr)?;
-//             }
-//             CommandResult::Error(rc, stdout, stderr) => {
-//                 writeln!(f, "cmd: {}", cmd)?;
-//                 writeln!(f, "rc: {}", rc)?;
-//                 writeln!(f, "stdout:\n\n{}\n", stdout)?;
-//                 writeln!(f, "stderr:\n\n{}\n", stderr)?;
-//             }
-//             CommandResult::FailedToStart(_str) => {}
-//         }
-
-//         Ok(())
-//     }
-// }
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct CommandLine(pub String, pub Vec<String>);
