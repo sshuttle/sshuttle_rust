@@ -15,6 +15,7 @@
         "reprs",
         "rustfmt",
         "sockaddr",
+        "sockopt",
         "socktype",
         "sshuttle",
         "Stdio",

@@ -24,7 +24,7 @@ pub struct Options {
     /// ssh hostname (and optional username and password) of remote server
     /// [USERNAME[:PASSWORD]@]ADDR[:PORT]
     #[clap(short, long, value_parser)]
-    pub remote: String,
+    pub remote: Option<String>,
 
     /// transproxy to this ip address and port number
     #[clap(short, long, value_parser)]

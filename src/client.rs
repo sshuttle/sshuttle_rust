@@ -16,7 +16,6 @@ use tokio::time::sleep;
 use tokio::{process::Command, spawn, task::JoinHandle};
 
 use crate::command::CommandError;
-use crate::commands::Commands;
 use crate::firewall::{
     Firewall, FirewallConfig, FirewallError, FirewallListenerConfig, FirewallSubnetConfig,
 };
@@ -25,7 +24,7 @@ use crate::network::Subnets;
 pub struct Config {
     pub includes: Subnets,
     pub excludes: Subnets,
-    pub remote: String,
+    pub remote: Option<String>,
     pub listen: Vec<SocketAddr>,
     pub socks_addr: SocketAddr,
 }
@@ -81,40 +80,71 @@ impl From<mpsc::error::SendError<Message>> for ClientError {
     }
 }
 
-// impl Debug for ParseError {}
 impl Error for ClientError {}
 
 pub async fn main(config: &Config) -> Result<(), ClientError> {
-    let shutdown_commands = start_firewall(config).await?;
+    let firewall_config = get_firewall_config(config);
+    let firewall = get_firewall(config)?;
+    let setup_commands = firewall.setup_firewall(&firewall_config)?;
+    let shutdown_commands = firewall.restore_firewall(&firewall_config)?;
 
-    let (ssh_tx, ssh_handle) = run_ssh(config).await?;
+    log::info!("Setting up firewall {:#?}", setup_commands);
+    setup_commands.run_all().await?;
 
-    let client = run_client(config);
-
-    tokio::pin!(ssh_handle);
-    tokio::pin!(client);
-
-    select! {
-        res = &mut ssh_handle => {
-            log::info!("ssh_handle finished");
-            res??;
-        },
-        res = &mut client => {
-            log::info!("client finished");
-            res?;
-        },
-        else => {
-            log::info!("everything finished");
-        }
+    log::debug!("run_everything");
+    let client_result = run_everything(config).await;
+    if let Err(err) = &client_result {
+        log::error!("run_everything error: {err}");
+    } else {
+        log::debug!("run_everything exited normally");
     }
 
-    // We don't care if the message fails, probably because ssh already exited.
-    _ = ssh_tx.send(Message::Shutdown).await;
+    log::info!("Restoring firewall{:#?}", shutdown_commands);
+    let shutdown_result = shutdown_commands.run_all().await;
+    if let Err(err) = &shutdown_result {
+        log::error!("Error restoring firewall: {err}");
+    } else {
+        log::debug!("Restored firewall");
+    }
 
-    println!("{:#?}", shutdown_commands);
-    shutdown_commands.run_all().await?;
+    client_result?;
+    shutdown_result?;
+    Ok(())
+}
 
-    log::info!("eeee");
+async fn run_everything(config: &Config) -> Result<(), ClientError> {
+    let ssh_connection = if let Some(remote) = &config.remote {
+        Some(run_ssh(config, remote.to_string()).await?)
+    } else {
+        None
+    };
+    let client = run_client(config);
+
+    if let Some(c) = ssh_connection {
+        let ssh_handle = c.handle;
+
+        tokio::pin!(ssh_handle);
+        tokio::pin!(client);
+
+        select! {
+            res = &mut ssh_handle => {
+                log::info!("ssh_handle finished");
+                res??;
+            },
+            res = &mut client => {
+                log::info!("client finished");
+                res?;
+            },
+            else => {
+                log::info!("everything finished");
+            }
+        }
+
+        // We don't care if the message fails, probably because ssh already exited.
+        _ = c.tx.send(Message::Shutdown).await;
+    } else {
+        client.await?;
+    }
 
     Ok(())
 }
@@ -156,16 +186,12 @@ enum Message {
     Shutdown,
 }
 
-async fn run_ssh(
-    config: &Config,
-) -> Result<
-    (
-        mpsc::Sender<Message>,
-        JoinHandle<Result<(), std::io::Error>>,
-    ),
-    ClientError,
-> {
-    let remote = config.remote.clone();
+struct SshConnection {
+    tx: mpsc::Sender<Message>,
+    handle: JoinHandle<Result<(), std::io::Error>>,
+}
+
+async fn run_ssh(config: &Config, remote: String) -> Result<SshConnection, ClientError> {
     let (tx, mut rx) = mpsc::channel(1);
     let socks = config.socks_addr;
 
@@ -175,7 +201,7 @@ async fn run_ssh(
             "-D".to_string(),
             socks.to_string(),
             "-N".to_string(),
-            remote.clone(),
+            remote,
         ];
 
         let mut child = Command::new("ssh").args(args).spawn()?;
@@ -213,10 +239,15 @@ async fn run_ssh(
         }
     });
 
-    Ok((tx, handle))
+    Ok(SshConnection { tx, handle })
 }
 
-async fn start_firewall(config: &Config) -> Result<Commands, ClientError> {
+fn get_firewall(_config: &Config) -> Result<Box<dyn Firewall>, ClientError> {
+    let firewall = crate::firewall::nat::NatFirewall::new();
+    Ok(Box::new(firewall))
+}
+
+fn get_firewall_config(config: &Config) -> FirewallConfig {
     let familys = config
         .listen
         .iter()
@@ -235,31 +266,22 @@ async fn start_firewall(config: &Config) -> Result<Commands, ClientError> {
             }),
         })
         .collect();
-
-    let firewall_config = FirewallConfig {
+    FirewallConfig {
         filter_from_user: None,
         listeners: familys,
-    };
-    let firewall = crate::firewall::nat::NatFirewall::new();
-    let commands = firewall.setup_firewall(&firewall_config)?;
-    let shutdown_commands = firewall.restore_firewall(&firewall_config)?;
-    println!("{:#?}", commands);
-    commands.run_all().await?;
-
-    Ok(shutdown_commands)
+    }
 }
 
 async fn run_client(config: &Config) -> Result<(), ClientError> {
     let socks_addr = config.socks_addr;
     let listen = config.listen.clone();
     for addr in listen {
-        println!("listening on: {}", addr);
         let listener = TcpListener::bind(addr).await?;
 
         let _handle = tokio::spawn(async move {
             loop {
                 let (socket, _) = listener.accept().await.unwrap();
-                println!("new connection from: {}", socket.peer_addr().unwrap());
+                log::debug!("new connection from: {}", socket.peer_addr().unwrap());
                 tokio::spawn(async move {
                     handle_tcp_client(socket, addr, socks_addr).await;
                 });
@@ -294,7 +316,10 @@ async fn handle_tcp_client(socket: TcpStream, addr: SocketAddr, socks_addr: Sock
             (Ipv6Addr::from(b).to_string(), a.sin6_port.to_be())
         }
     };
-    println!("-----> target ip: [{addr}]:{port}");
+    log::info!(
+        "got connection from {} to [{addr}]:{port}",
+        local.peer_addr().unwrap()
+    );
 
     let mut remote_config = fast_socks5::client::Config::default();
     remote_config.set_skip_auth(false);
@@ -305,7 +330,7 @@ async fn handle_tcp_client(socket: TcpStream, addr: SocketAddr, socks_addr: Sock
     let result = copy_bidirectional(&mut local, &mut remote).await;
     // let result = my_bidirectional_copy(&mut local, &mut remote).await;
 
-    log::info!("copy_bidirectional result: {:?}", result);
+    log::debug!("copy_bidirectional result: {:?}", result);
 }
 
 // async fn my_bidirectional_copy(

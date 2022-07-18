@@ -93,7 +93,7 @@ fn options_to_config(opt: &options::Options) -> Result<Config, ConfigError> {
         });
     }
 
-    let remote = opt.remote.to_string();
+    let remote = opt.remote.to_owned();
 
     let config = Config {
         includes,
