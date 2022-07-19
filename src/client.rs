@@ -83,6 +83,16 @@ impl From<mpsc::error::SendError<Message>> for ClientError {
 impl Error for ClientError {}
 
 pub async fn main(config: &Config) -> Result<(), ClientError> {
+    let (control_tx, control_rx) = mpsc::channel(1);
+
+    let tx_clone = control_tx.clone();
+    ctrlc::set_handler(move || {
+        tx_clone
+            .blocking_send(Message::Shutdown)
+            .expect("Could not send signal on channel.")
+    })
+    .expect("Error setting Ctrl-C handler");
+
     let firewall_config = get_firewall_config(config);
     let firewall = get_firewall(config)?;
     let setup_commands = firewall.setup_firewall(&firewall_config)?;
@@ -92,7 +102,7 @@ pub async fn main(config: &Config) -> Result<(), ClientError> {
     setup_commands.run_all().await?;
 
     log::debug!("run_everything");
-    let client_result = run_everything(config).await;
+    let client_result = run_everything(config, control_tx, control_rx).await;
     if let Err(err) = &client_result {
         log::error!("run_everything error: {err}");
     } else {
@@ -112,11 +122,21 @@ pub async fn main(config: &Config) -> Result<(), ClientError> {
     Ok(())
 }
 
-async fn run_everything(config: &Config) -> Result<(), ClientError> {
+async fn run_everything(
+    config: &Config,
+    control_tx: mpsc::Sender<Message>,
+    mut control_rx: mpsc::Receiver<Message>,
+) -> Result<(), ClientError> {
     let client = run_client(config);
 
     if let Some(remote) = &config.remote {
-        let c = run_ssh(config, remote.to_string()).await?;
+        // ssh shutdown sequence with ssh:
+        // ctrlc handler sends signal to control_tx.
+        // ssh handler receives event from control_rx.
+        // ssh handler kills ssh.
+        // ssh_handle completes, and the select finishes.
+        // we return.
+        let c = run_ssh(config, remote.to_string(), control_rx).await?;
         let ssh_handle = c.handle;
 
         tokio::pin!(ssh_handle);
@@ -137,9 +157,21 @@ async fn run_everything(config: &Config) -> Result<(), ClientError> {
         }
 
         // We don't care if the message fails, probably because ssh already exited.
-        _ = c.tx.send(Message::Shutdown).await;
+        _ = control_tx.send(Message::Shutdown).await;
     } else {
-        client.await?;
+        // ssh shutdown sequence without ssh:
+        // ctrlc handler sends signal to control_tx.
+        // the select finishes.
+        // we return.
+        select! {
+            res = client => {
+                log::info!("client finished");
+                res?;
+            },
+            Some(_) = control_rx.recv() => {
+                log::info!("control_rx shutdown requested");
+            }
+        }
     }
 
     Ok(())
@@ -177,67 +209,6 @@ async fn run_everything(config: &Config) -> Result<(), ClientError> {
 //     }
 // }
 
-#[derive(Debug)]
-enum Message {
-    Shutdown,
-}
-
-struct SshConnection {
-    tx: mpsc::Sender<Message>,
-    handle: JoinHandle<Result<(), std::io::Error>>,
-}
-
-async fn run_ssh(config: &Config, remote: String) -> Result<SshConnection, ClientError> {
-    let (tx, mut rx) = mpsc::channel(1);
-    let socks = config.socks_addr;
-
-    let tx_clone = tx.clone();
-    let handle: JoinHandle<Result<(), std::io::Error>> = spawn(async move {
-        let args = vec![
-            "-D".to_string(),
-            socks.to_string(),
-            "-N".to_string(),
-            remote,
-        ];
-
-        let mut child = Command::new("ssh").args(args).spawn()?;
-
-        ctrlc::set_handler(move || {
-            tx_clone
-                .blocking_send(Message::Shutdown)
-                .expect("Could not send signal on channel.")
-        })
-        .expect("Error setting Ctrl-C handler");
-
-        tokio::select! {
-            msg = rx.recv() => {
-                log::info!("ssh shutdown requested, killing child ssh: {msg:?}");
-                child.kill().await?;
-                Ok(())
-            }
-            status = child.wait() => {
-                match status {
-                    Ok(rc) => {
-                        if rc.success() {
-                            log::error!("ssh exited with rc: {rc}");
-                            Ok(())
-                        } else {
-                            log::info!("ssh exited with rc: {rc}");
-                            Err(std::io::Error::new(std::io::ErrorKind::Other, "ssh failed"))
-                        }
-                    }
-                    Err(err) => {
-                        log::error!("ssh wait failed: {err}");
-                        Err(err)
-                    }
-                }
-            }
-        }
-    });
-
-    Ok(SshConnection { tx, handle })
-}
-
 fn get_firewall(_config: &Config) -> Result<Box<dyn Firewall>, ClientError> {
     let firewall = crate::firewall::nat::NatFirewall::new();
     Ok(Box::new(firewall))
@@ -268,7 +239,63 @@ fn get_firewall_config(config: &Config) -> FirewallConfig {
     }
 }
 
-async fn run_client(config: &Config) -> Result<(), ClientError> {
+#[derive(Debug, Clone)]
+enum Message {
+    Shutdown,
+}
+
+struct Task {
+    // tx: mpsc::Sender<Message>,
+    handle: JoinHandle<Result<(), std::io::Error>>,
+}
+
+async fn run_ssh(
+    config: &Config,
+    remote: String,
+    mut rx: mpsc::Receiver<Message>,
+) -> Result<Task, ClientError> {
+    let socks = config.socks_addr;
+
+    let handle: JoinHandle<Result<(), std::io::Error>> = spawn(async move {
+        let args = vec![
+            "-D".to_string(),
+            socks.to_string(),
+            "-N".to_string(),
+            remote,
+        ];
+
+        let mut child = Command::new("ssh").args(args).spawn()?;
+
+        tokio::select! {
+            msg = rx.recv() => {
+                log::info!("ssh shutdown requested, killing child ssh: {msg:?}");
+                child.kill().await?;
+                Ok(())
+            }
+            status = child.wait() => {
+                match status {
+                    Ok(rc) => {
+                        if rc.success() {
+                            log::error!("ssh exited with rc: {rc}");
+                            Ok(())
+                        } else {
+                            log::info!("ssh exited with rc: {rc}");
+                            Err(std::io::Error::new(std::io::ErrorKind::Other, "ssh failed"))
+                        }
+                    }
+                    Err(err) => {
+                        log::error!("ssh wait failed: {err}");
+                        Err(err)
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(Task { handle })
+}
+
+async fn run_client(config: &Config) -> Result<Task, ClientError> {
     let socks_addr = config.socks_addr;
     let listen = config.listen.clone();
     for addr in listen {
