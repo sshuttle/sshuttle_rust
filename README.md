@@ -14,12 +14,13 @@ Features that are implemented:
 * TCP support.
 * socks5 support.
 * nat firewall support.
+* TPROXY firewall support.
 
 Missing features include, but not limited to:
 
 * Automatic detection of available ports to use.
 * sudo support.
-* Other firewalls, such as TPROXY and OSX support.
+* Other firewalls, such as OSX support.
 * UDP support.
 * DNS support.
 * Daemon support.

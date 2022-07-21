@@ -17,6 +17,12 @@ impl Display for ParseError {
 // impl Debug for ParseError {}
 impl Error for ParseError {}
 
+#[derive(Clone, clap::ArgEnum, Debug, Copy)]
+pub enum FirewallType {
+    Nat,
+    TProxy,
+}
+
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -41,6 +47,9 @@ pub struct Options {
     //exclude this subnet (can be used more than once)
     #[clap(short, long, default_value = "127.0.0.1:1080")]
     pub socks: SocketAddr,
+
+    #[clap(short, long, arg_enum, default_value_t = FirewallType::Nat)]
+    pub firewall: FirewallType,
 }
 
 pub fn parse() -> Options {

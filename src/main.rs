@@ -101,6 +101,7 @@ fn options_to_config(opt: &options::Options) -> Result<Config, ConfigError> {
         remote,
         listen: opt.listen.clone(),
         socks_addr: opt.socks,
+        firewall: opt.firewall,
     };
 
     Ok(config)

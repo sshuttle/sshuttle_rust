@@ -1,12 +1,9 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::os::unix::prelude::AsRawFd;
+use std::net::IpAddr;
 use std::time::Duration;
 use std::{error::Error, fmt::Display, net::SocketAddr};
 
 use fast_socks5::client::Socks5Stream;
 
-use nix::sys::socket::getsockopt;
-use nix::sys::socket::sockopt::{Ip6tOriginalDst, OriginalDst};
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
@@ -17,9 +14,11 @@ use tokio::{process::Command, spawn, task::JoinHandle};
 
 use crate::command::CommandError;
 use crate::firewall::{
-    Firewall, FirewallConfig, FirewallError, FirewallListenerConfig, FirewallSubnetConfig,
+    self, Firewall, FirewallConfig, FirewallError, FirewallListenerConfig, FirewallSubnetConfig,
+    GetDstAddrMethod,
 };
 use crate::network::Subnets;
+use crate::options::FirewallType;
 
 pub struct Config {
     pub includes: Subnets,
@@ -27,6 +26,7 @@ pub struct Config {
     pub remote: Option<String>,
     pub listen: Vec<SocketAddr>,
     pub socks_addr: SocketAddr,
+    pub firewall: FirewallType,
 }
 
 #[derive(Debug)]
@@ -102,7 +102,7 @@ pub async fn main(config: &Config) -> Result<(), ClientError> {
     setup_commands.run_all().await?;
 
     log::debug!("run_everything");
-    let client_result = run_everything(config, control_tx, control_rx).await;
+    let client_result = run_everything(config, &*firewall, control_tx, control_rx).await;
     if let Err(err) = &client_result {
         log::error!("run_everything error: {err}");
     } else {
@@ -124,10 +124,11 @@ pub async fn main(config: &Config) -> Result<(), ClientError> {
 
 async fn run_everything(
     config: &Config,
+    firewall: &dyn Firewall,
     control_tx: mpsc::Sender<Message>,
     mut control_rx: mpsc::Receiver<Message>,
 ) -> Result<(), ClientError> {
-    let client = run_client(config);
+    let client = run_client(config, firewall);
 
     if let Some(remote) = &config.remote {
         // ssh shutdown sequence with ssh:
@@ -209,9 +210,12 @@ async fn run_everything(
 //     }
 // }
 
-fn get_firewall(_config: &Config) -> Result<Box<dyn Firewall>, ClientError> {
-    let firewall = crate::firewall::nat::NatFirewall::new();
-    Ok(Box::new(firewall))
+fn get_firewall(config: &Config) -> Result<Box<dyn Firewall>, ClientError> {
+    let firewall: Box<dyn Firewall> = match config.firewall {
+        FirewallType::Nat => Box::new(crate::firewall::nat::NatFirewall::new()),
+        FirewallType::TProxy => Box::new(crate::firewall::tproxy::TProxyFirewall::new()),
+    };
+    Ok(firewall)
 }
 
 fn get_firewall_config(config: &Config) -> FirewallConfig {
@@ -295,18 +299,20 @@ async fn run_ssh(
     Ok(Task { handle })
 }
 
-async fn run_client(config: &Config) -> Result<Task, ClientError> {
+async fn run_client(config: &Config, firewall: &dyn Firewall) -> Result<Task, ClientError> {
     let socks_addr = config.socks_addr;
     let listen = config.listen.clone();
+    let method = firewall.get_dst_addr_method();
+
     for addr in listen {
         let listener = TcpListener::bind(addr).await?;
+        firewall.setup_tcp_listener(&listener)?;
 
         let _handle = tokio::spawn(async move {
             loop {
                 let (socket, _) = listener.accept().await.unwrap();
-                log::debug!("new connection from: {}", socket.peer_addr().unwrap());
                 tokio::spawn(async move {
-                    handle_tcp_client(socket, addr, socks_addr).await;
+                    handle_tcp_client(socket, addr, socks_addr, method).await;
                 });
             }
         });
@@ -317,36 +323,28 @@ async fn run_client(config: &Config) -> Result<Task, ClientError> {
     }
 }
 
-async fn handle_tcp_client(socket: TcpStream, addr: SocketAddr, socks_addr: SocketAddr) {
+async fn handle_tcp_client(
+    socket: TcpStream,
+    addr: SocketAddr,
+    socks_addr: SocketAddr,
+    method: GetDstAddrMethod,
+) {
     let mut local = socket;
+    let local_addr = local.peer_addr().unwrap();
+    log::debug!("new connection from: {}", local_addr);
 
-    let (addr, port) = match addr {
-        SocketAddr::V4(_) => {
-            let a = getsockopt(local.as_raw_fd(), OriginalDst).unwrap();
-            (
-                Ipv4Addr::from(u32::from_be(a.sin_addr.s_addr)).to_string(),
-                a.sin_port.to_be(),
-            )
-        }
-        SocketAddr::V6(_) => {
-            let a = getsockopt(local.as_raw_fd(), Ip6tOriginalDst).unwrap();
-            let mut b = a.sin6_addr.s6_addr;
-            let u16 = unsafe { std::slice::from_raw_parts_mut(b.as_mut_ptr() as *mut u8, 8) };
-            for i in u16.iter_mut() {
-                *i = i.to_be();
-            }
+    let remote_addr = firewall::get_dst_addr(&local, method).unwrap();
+    log::info!("{addr} got connection from {local_addr} to {remote_addr}");
 
-            (Ipv6Addr::from(b).to_string(), a.sin6_port.to_be())
-        }
+    let (addr_str, port) = {
+        let addr = remote_addr.ip().to_string();
+        let port = remote_addr.port();
+        (addr, port)
     };
-    log::info!(
-        "got connection from {} to [{addr}]:{port}",
-        local.peer_addr().unwrap()
-    );
 
     let mut remote_config = fast_socks5::client::Config::default();
     remote_config.set_skip_auth(false);
-    let mut remote = Socks5Stream::connect(socks_addr, addr, port, remote_config)
+    let mut remote = Socks5Stream::connect(socks_addr, addr_str, port, remote_config)
         .await
         .unwrap();
 

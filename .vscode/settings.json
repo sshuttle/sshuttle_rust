@@ -3,6 +3,7 @@
         "addrinfo",
         "addrtype",
         "dport",
+        "Errno",
         "familys",
         "fconfig",
         "fport",
@@ -14,6 +15,8 @@
         "PREROUTING",
         "reprs",
         "rustfmt",
+        "setsocketopt",
+        "setsockopt",
         "sockaddr",
         "sockopt",
         "socktype",
@@ -21,6 +24,7 @@
         "Stdio",
         "subnetport",
         "SWIDTHS",
+        "tmark",
         "TPROXY"
     ]
 }

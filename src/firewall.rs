@@ -1,4 +1,18 @@
-use std::{error::Error, fmt::Display};
+use std::{
+    error::Error,
+    fmt::Display,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    os::unix::prelude::AsRawFd,
+};
+
+use nix::{
+    errno::Errno,
+    sys::socket::{
+        getsockopt,
+        sockopt::{Ip6tOriginalDst, OriginalDst},
+    },
+};
+use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
     commands::Commands,
@@ -7,6 +21,7 @@ use crate::{
 };
 
 pub mod nat;
+pub mod tproxy;
 
 #[derive(Debug)]
 pub struct FirewallError {
@@ -21,7 +36,69 @@ impl Display for FirewallError {
 
 impl Error for FirewallError {}
 
+impl From<Errno> for FirewallError {
+    fn from(err: Errno) -> Self {
+        FirewallError {
+            message: format!("Errno {}", err),
+        }
+    }
+}
+
+impl From<std::io::Error> for FirewallError {
+    fn from(err: std::io::Error) -> Self {
+        FirewallError {
+            message: format!("std::io::Error: {}", err),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum GetDstAddrMethod {
+    SockOpt,
+    SockName,
+}
+
+fn get_dst_addr_sockopt(s: &TcpStream) -> Result<SocketAddr, FirewallError> {
+    let addr = match s.local_addr()? {
+        SocketAddr::V4(_) => {
+            let a = getsockopt(s.as_raw_fd(), OriginalDst).unwrap();
+            let addr = Ipv4Addr::from(u32::from_be(a.sin_addr.s_addr));
+            let port = a.sin_port.to_be();
+            SocketAddr::new(IpAddr::V4(addr), port)
+        }
+        SocketAddr::V6(_) => {
+            let a = getsockopt(s.as_raw_fd(), Ip6tOriginalDst).unwrap();
+            let mut b = a.sin6_addr.s6_addr;
+            let u16 = unsafe { std::slice::from_raw_parts_mut(b.as_mut_ptr() as *mut u8, 8) };
+            for i in u16.iter_mut() {
+                *i = i.to_be();
+            }
+
+            let addr = Ipv6Addr::from(b);
+            let port = a.sin6_port.to_be();
+            SocketAddr::new(IpAddr::V6(addr), port)
+        }
+    };
+    Ok(addr)
+}
+
+pub fn get_dst_addr(s: &TcpStream, method: GetDstAddrMethod) -> Result<SocketAddr, FirewallError> {
+    let addr = match method {
+        GetDstAddrMethod::SockOpt => get_dst_addr_sockopt(s)?,
+        GetDstAddrMethod::SockName => s.local_addr()?,
+    };
+    Ok(addr)
+}
+
 pub trait Firewall {
+    fn setup_tcp_listener(&self, _l: &TcpListener) -> Result<(), FirewallError> {
+        Ok(())
+    }
+
+    fn get_dst_addr_method(&self) -> GetDstAddrMethod {
+        GetDstAddrMethod::SockOpt
+    }
+
     fn setup_firewall(&self, config: &FirewallConfig) -> Result<Commands, FirewallError>;
     fn restore_firewall(&self, config: &FirewallConfig) -> Result<Commands, FirewallError>;
 }
