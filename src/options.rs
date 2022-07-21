@@ -20,6 +20,7 @@ impl Error for ParseError {}
 #[derive(Clone, clap::ArgEnum, Debug, Copy)]
 pub enum FirewallType {
     Nat,
+    #[clap(name = "tproxy")]
     TProxy,
 }
 
