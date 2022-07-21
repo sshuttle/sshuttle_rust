@@ -1,14 +1,15 @@
+use std::net::SocketAddr;
 use std::os::unix::prelude::AsRawFd;
 
 use nix::sys::socket::setsockopt;
 use nix::sys::socket::sockopt::IpTransparent;
 use tokio::net::TcpListener;
+use tokio::net::TcpStream;
 
 use crate::network::Ports;
 use crate::network::SubnetFamily;
 use crate::network::SubnetsFamily;
 
-use super::GetDstAddrMethod;
 use super::{Commands, Firewall, FirewallConfig, FirewallError, FirewallSubnetConfig};
 
 pub struct TProxyFirewall {}
@@ -169,8 +170,8 @@ impl Firewall for TProxyFirewall {
         Ok(())
     }
 
-    fn get_dst_addr_method(&self) -> GetDstAddrMethod {
-        GetDstAddrMethod::SockName
+    fn get_dst_addr(&self, s: &TcpStream) -> Result<SocketAddr, FirewallError> {
+        Ok(s.local_addr()?)
     }
 
     fn setup_firewall(&self, config: &FirewallConfig) -> Result<Commands, FirewallError> {

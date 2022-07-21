@@ -52,12 +52,6 @@ impl From<std::io::Error> for FirewallError {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum GetDstAddrMethod {
-    SockOpt,
-    SockName,
-}
-
 fn get_dst_addr_sockopt(s: &TcpStream) -> Result<SocketAddr, FirewallError> {
     let addr = match s.local_addr()? {
         SocketAddr::V4(_) => {
@@ -82,21 +76,13 @@ fn get_dst_addr_sockopt(s: &TcpStream) -> Result<SocketAddr, FirewallError> {
     Ok(addr)
 }
 
-pub fn get_dst_addr(s: &TcpStream, method: GetDstAddrMethod) -> Result<SocketAddr, FirewallError> {
-    let addr = match method {
-        GetDstAddrMethod::SockOpt => get_dst_addr_sockopt(s)?,
-        GetDstAddrMethod::SockName => s.local_addr()?,
-    };
-    Ok(addr)
-}
-
 pub trait Firewall {
     fn setup_tcp_listener(&self, _l: &TcpListener) -> Result<(), FirewallError> {
         Ok(())
     }
 
-    fn get_dst_addr_method(&self) -> GetDstAddrMethod {
-        GetDstAddrMethod::SockOpt
+    fn get_dst_addr(&self, s: &TcpStream) -> Result<SocketAddr, FirewallError> {
+        get_dst_addr_sockopt(s)
     }
 
     fn setup_firewall(&self, config: &FirewallConfig) -> Result<Commands, FirewallError>;

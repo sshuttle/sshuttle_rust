@@ -1,4 +1,5 @@
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::{error::Error, fmt::Display, net::SocketAddr};
 
@@ -14,8 +15,7 @@ use tokio::{process::Command, spawn, task::JoinHandle};
 
 use crate::command::CommandError;
 use crate::firewall::{
-    self, Firewall, FirewallConfig, FirewallError, FirewallListenerConfig, FirewallSubnetConfig,
-    GetDstAddrMethod,
+    Firewall, FirewallConfig, FirewallError, FirewallListenerConfig, FirewallSubnetConfig,
 };
 use crate::network::Subnets;
 use crate::options::FirewallType;
@@ -102,7 +102,7 @@ pub async fn main(config: &Config) -> Result<(), ClientError> {
     setup_commands.run_all().await?;
 
     log::debug!("run_everything");
-    let client_result = run_everything(config, &*firewall, control_tx, control_rx).await;
+    let client_result = run_everything(config, firewall, control_tx, control_rx).await;
     if let Err(err) = &client_result {
         log::error!("run_everything error: {err}");
     } else {
@@ -124,7 +124,7 @@ pub async fn main(config: &Config) -> Result<(), ClientError> {
 
 async fn run_everything(
     config: &Config,
-    firewall: &dyn Firewall,
+    firewall: Box<dyn Firewall + Send + Sync>,
     control_tx: mpsc::Sender<Message>,
     mut control_rx: mpsc::Receiver<Message>,
 ) -> Result<(), ClientError> {
@@ -210,8 +210,8 @@ async fn run_everything(
 //     }
 // }
 
-fn get_firewall(config: &Config) -> Result<Box<dyn Firewall>, ClientError> {
-    let firewall: Box<dyn Firewall> = match config.firewall {
+fn get_firewall(config: &Config) -> Result<Box<dyn Firewall + Send + Sync>, ClientError> {
+    let firewall: Box<dyn Firewall + Send + Sync> = match config.firewall {
         FirewallType::Nat => Box::new(crate::firewall::nat::NatFirewall::new()),
         FirewallType::TProxy => Box::new(crate::firewall::tproxy::TProxyFirewall::new()),
     };
@@ -299,20 +299,27 @@ async fn run_ssh(
     Ok(Task { handle })
 }
 
-async fn run_client(config: &Config, firewall: &dyn Firewall) -> Result<Task, ClientError> {
+async fn run_client(
+    config: &Config,
+    firewall: Box<dyn Firewall + Send + Sync>,
+) -> Result<Task, ClientError> {
     let socks_addr = config.socks_addr;
     let listen = config.listen.clone();
-    let method = firewall.get_dst_addr_method();
 
+    let firewall: Arc<dyn Firewall + Send + Sync> = Arc::from(firewall);
     for addr in listen {
+        let firewall = Arc::clone(&firewall);
         let listener = TcpListener::bind(addr).await?;
         firewall.setup_tcp_listener(&listener)?;
 
         let _handle = tokio::spawn(async move {
+            firewall.setup_tcp_listener(&listener).unwrap();
+
             loop {
+                let firewall = Arc::clone(&firewall);
                 let (socket, _) = listener.accept().await.unwrap();
                 tokio::spawn(async move {
-                    handle_tcp_client(socket, addr, socks_addr, method).await;
+                    handle_tcp_client(socket, addr, socks_addr, firewall).await;
                 });
             }
         });
@@ -327,13 +334,13 @@ async fn handle_tcp_client(
     socket: TcpStream,
     addr: SocketAddr,
     socks_addr: SocketAddr,
-    method: GetDstAddrMethod,
+    firewall: Arc<dyn Firewall + Send + Sync>,
 ) {
     let mut local = socket;
     let local_addr = local.peer_addr().unwrap();
     log::debug!("new connection from: {}", local_addr);
 
-    let remote_addr = firewall::get_dst_addr(&local, method).unwrap();
+    let remote_addr = firewall.get_dst_addr(&local).unwrap();
     log::info!("{addr} got connection from {local_addr} to {remote_addr}");
 
     let (addr_str, port) = {
