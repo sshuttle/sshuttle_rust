@@ -1,4 +1,5 @@
 use crate::network::Ports;
+use crate::network::Protocol;
 use crate::network::SubnetFamily;
 use crate::network::SubnetsFamily;
 
@@ -18,7 +19,13 @@ impl NatFirewall {
         fconfig: &FirewallSubnetConfig<T>,
         commands: &mut Commands,
     ) -> Result<(), FirewallError> {
-        let port = fconfig.port.to_string();
+        if !matches!(fconfig.listener.protocol, Protocol::Tcp) {
+            return Err(FirewallError {
+                message: "Only TCP is supported for NAT".to_string(),
+            });
+        }
+
+        let port = fconfig.listener.port().to_string();
         let chain = format!("sshuttle-{}", port);
         let family = fconfig.family();
 
@@ -95,8 +102,14 @@ impl NatFirewall {
         fconfig: &FirewallSubnetConfig<T>,
         commands: &mut Commands,
     ) -> Result<(), FirewallError> {
-        let port = fconfig.port.to_string();
-        let chain = format!("sshuttle-{}", fconfig.port);
+        if !matches!(fconfig.listener.protocol, Protocol::Tcp) {
+            return Err(FirewallError {
+                message: "Only TCP is supported for NAT".to_string(),
+            });
+        }
+
+        let port = fconfig.listener.port().to_string();
+        let chain = format!("sshuttle-{}", port);
         let family = fconfig.family();
 
         macro_rules! ipt {
@@ -167,7 +180,7 @@ impl Firewall for NatFirewall {
 mod tests {
     use crate::{
         command::CommandLine,
-        network::{SubnetsV4, SubnetsV6},
+        network::{ListenerAddr, SubnetsV4, SubnetsV6},
     };
 
     use super::*;
@@ -177,7 +190,10 @@ mod tests {
         let firewall = NatFirewall::new();
         let ipv4_family = FirewallSubnetConfig {
             enable: true,
-            port: 1025,
+            listener: ListenerAddr {
+                protocol: Protocol::Tcp,
+                addr: "127.0.0.1:1024".parse().unwrap(),
+            },
             includes: "1.2.3.0/24:8000-9000".parse::<SubnetsV4>().unwrap(),
             excludes: "1.2.3.66:8080".parse::<SubnetsV4>().unwrap(),
         };
@@ -187,13 +203,13 @@ mod tests {
         };
 
         let expected_ipv4: [&str; 7] = [
-            "iptables -w -t nat -N sshuttle-1025",
-            "iptables -w -t nat -F sshuttle-1025",
-            "iptables -w -t nat -I OUTPUT 1 -j sshuttle-1025",
-            "iptables -w -t nat -I PREROUTING 1 -j sshuttle-1025",
-            "iptables -w -t nat -A sshuttle-1025 -j RETURN -m addrtype --dst-type LOCAL",
-            "iptables -w -t nat -A sshuttle-1025 -j RETURN --dest 1.2.3.66/32 -p tcp --dport 8080",
-            "iptables -w -t nat -A sshuttle-1025 -j REDIRECT --dest 1.2.3.0/24 -p tcp --dport 8000:9000 --to-ports 1025",
+            "iptables -w -t nat -N sshuttle-1024",
+            "iptables -w -t nat -F sshuttle-1024",
+            "iptables -w -t nat -I OUTPUT 1 -j sshuttle-1024",
+            "iptables -w -t nat -I PREROUTING 1 -j sshuttle-1024",
+            "iptables -w -t nat -A sshuttle-1024 -j RETURN -m addrtype --dst-type LOCAL",
+            "iptables -w -t nat -A sshuttle-1024 -j RETURN --dest 1.2.3.66/32 -p tcp --dport 8080",
+            "iptables -w -t nat -A sshuttle-1024 -j REDIRECT --dest 1.2.3.0/24 -p tcp --dport 8000:9000 --to-ports 1024",
         ];
 
         let mut commands = Commands::default();
@@ -213,7 +229,10 @@ mod tests {
         let firewall = NatFirewall::new();
         let ipv6_family = FirewallSubnetConfig {
             enable: true,
-            port: 1024,
+            listener: ListenerAddr {
+                protocol: Protocol::Tcp,
+                addr: "127.0.0.1:1024".parse().unwrap(),
+            },
             includes: "2404:6800:4004:80c::/64".parse::<SubnetsV6>().unwrap(),
             excludes: "[2404:6800:4004:80c::101f]:80".parse().unwrap(),
         };
@@ -248,7 +267,10 @@ mod tests {
         let firewall = NatFirewall::new();
         let ipv4_family = FirewallSubnetConfig {
             enable: true,
-            port: 1024,
+            listener: ListenerAddr {
+                protocol: Protocol::Tcp,
+                addr: "127.0.0.1:1024".parse().unwrap(),
+            },
             includes: "1.2.3.0/32".parse::<SubnetsV4>().unwrap(),
             excludes: "1.2.3.66".parse::<SubnetsV4>().unwrap(),
         };
@@ -281,7 +303,10 @@ mod tests {
         let firewall = NatFirewall::new();
         let ipv6_family = FirewallSubnetConfig {
             enable: true,
-            port: 1024,
+            listener: ListenerAddr {
+                protocol: Protocol::Tcp,
+                addr: "127.0.0.1:1024".parse().unwrap(),
+            },
             includes: "2404:6800:4004:80c::/64".parse::<SubnetsV6>().unwrap(),
             excludes: "[2404:6800:4004:80c::101f]:80".parse().unwrap(),
         };

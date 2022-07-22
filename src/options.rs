@@ -34,23 +34,30 @@ pub struct Options {
     pub remote: Option<String>,
 
     /// transproxy to this ip address and port number
+    ///
+    /// Maybe used twice, once for IPv4 and once for IPv6.
     #[clap(short, long, value_parser)]
     pub listen: Vec<SocketAddr>,
 
-    /// capture and forward traffic to these subnets (whitespace separated)
+    /// Capture and forward traffic to these subnets (whitespace separated)
     /// IP/MASK[:PORT[-PORT]]...
     pub include: Vec<Subnets>,
 
-    //exclude this subnet (can be used more than once)
+    /// Exclude this subnet (can be used more than once)
     #[clap(short, long)]
     pub exclude: Vec<Subnets>,
 
-    //exclude this subnet (can be used more than once)
+    /// Exclude this subnet (can be used more than once)
     #[clap(short, long, default_value = "127.0.0.1:1080")]
     pub socks: SocketAddr,
 
+    /// What kind of firewall to use
     #[clap(short, long, arg_enum, default_value_t = FirewallType::Nat)]
     pub firewall: FirewallType,
+
+    /// Enable UDP support
+    #[clap(short, long)]
+    pub udp: bool,
 }
 
 pub fn parse() -> Options {

@@ -1,10 +1,13 @@
-use std::net::IpAddr;
+use std::io::IoSliceMut;
+use std::net::{IpAddr, UdpSocket};
+use std::os::unix::prelude::AsRawFd;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{error::Error, fmt::Display, net::SocketAddr};
 
 use fast_socks5::client::Socks5Stream;
 
+use nix::sys::socket::{recvmsg, MsgFlags, RecvMsg};
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
@@ -17,14 +20,14 @@ use crate::command::CommandError;
 use crate::firewall::{
     Firewall, FirewallConfig, FirewallError, FirewallListenerConfig, FirewallSubnetConfig,
 };
-use crate::network::Subnets;
+use crate::network::{ListenerAddr, Subnets};
 use crate::options::FirewallType;
 
 pub struct Config {
     pub includes: Subnets,
     pub excludes: Subnets,
     pub remote: Option<String>,
-    pub listen: Vec<SocketAddr>,
+    pub listen: Vec<ListenerAddr>,
     pub socks_addr: SocketAddr,
     pub firewall: FirewallType,
 }
@@ -225,13 +228,13 @@ fn get_firewall_config(config: &Config) -> FirewallConfig {
         .map(|addr| match addr.ip() {
             IpAddr::V4(_) => FirewallListenerConfig::Ipv4(FirewallSubnetConfig {
                 enable: true,
-                port: addr.port(),
+                listener: addr.clone(),
                 includes: config.includes.ipv4(),
                 excludes: config.excludes.ipv4(),
             }),
             IpAddr::V6(_) => FirewallListenerConfig::Ipv6(FirewallSubnetConfig {
                 enable: true,
-                port: addr.port(),
+                listener: addr.clone(),
                 includes: config.includes.ipv6(),
                 excludes: config.excludes.ipv6(),
             }),
@@ -307,22 +310,12 @@ async fn run_client(
     let listen = config.listen.clone();
 
     let firewall: Arc<dyn Firewall + Send + Sync> = Arc::from(firewall);
-    for addr in listen {
-        let firewall = Arc::clone(&firewall);
-        let listener = TcpListener::bind(addr).await?;
-        firewall.setup_tcp_listener(&listener)?;
-
-        let _handle = tokio::spawn(async move {
-            firewall.setup_tcp_listener(&listener).unwrap();
-
-            loop {
-                let firewall = Arc::clone(&firewall);
-                let (socket, _) = listener.accept().await.unwrap();
-                tokio::spawn(async move {
-                    handle_tcp_client(socket, addr, socks_addr, firewall).await;
-                });
-            }
-        });
+    for l_addr in listen {
+        println!("----> {}", l_addr);
+        match l_addr.protocol {
+            crate::network::Protocol::Tcp => listen_tcp(&firewall, l_addr, socks_addr).await?,
+            crate::network::Protocol::Udp => listen_udp(&firewall, l_addr, socks_addr).await?,
+        }
     }
 
     loop {
@@ -330,9 +323,61 @@ async fn run_client(
     }
 }
 
+async fn listen_tcp(
+    firewall: &Arc<dyn Firewall + Send + Sync>,
+    l_addr: ListenerAddr,
+    socks_addr: SocketAddr,
+) -> Result<(), ClientError> {
+    let firewall = Arc::clone(firewall);
+    let listener = TcpListener::bind(l_addr.addr).await?;
+    firewall.setup_tcp_listener(&listener)?;
+
+    let _handle = tokio::spawn(async move {
+        loop {
+            let firewall = Arc::clone(&firewall);
+            let (socket, _) = listener.accept().await.unwrap();
+            let l_addr = l_addr.clone();
+            tokio::spawn(async move {
+                handle_tcp_client(socket, &l_addr, socks_addr, firewall).await;
+            });
+        }
+    });
+    Ok(())
+}
+
+async fn listen_udp(
+    firewall: &Arc<dyn Firewall + Send + Sync>,
+    l_addr: ListenerAddr,
+    _socks_addr: SocketAddr,
+) -> Result<(), ClientError> {
+    let firewall = Arc::clone(firewall);
+    tokio::task::spawn_blocking(move || {
+        // let firewall = Arc::clone(firewall);
+        let local = UdpSocket::bind(l_addr.addr)?;
+        local.set_nonblocking(false)?;
+        firewall.setup_udp_socket(&local)?;
+        std::thread::spawn(move || loop {
+            let mut buf = vec![0u8; 1024];
+            let ioslice = IoSliceMut::new(&mut buf);
+            let mut cmsg_buffer = vec![0u8; 24];
+            println!("{l_addr} UDP waiting");
+            let cmsg: RecvMsg<nix::sys::socket::SockAddr> = recvmsg(
+                local.as_raw_fd(),
+                &mut [ioslice],
+                Some(&mut cmsg_buffer),
+                MsgFlags::empty(),
+            )
+            .unwrap();
+            println!("{l_addr} UDP {cmsg:?}");
+        });
+        Ok(())
+    })
+    .await?
+}
+
 async fn handle_tcp_client(
     socket: TcpStream,
-    addr: SocketAddr,
+    l_addr: &ListenerAddr,
     socks_addr: SocketAddr,
     firewall: Arc<dyn Firewall + Send + Sync>,
 ) {
@@ -341,7 +386,7 @@ async fn handle_tcp_client(
     log::debug!("new connection from: {}", local_addr);
 
     let remote_addr = firewall.get_dst_addr(&local).unwrap();
-    log::info!("{addr} got connection from {local_addr} to {remote_addr}");
+    log::info!("{l_addr} got connection from {local_addr} to {remote_addr}");
 
     let (addr_str, port) = {
         let addr = remote_addr.ip().to_string();

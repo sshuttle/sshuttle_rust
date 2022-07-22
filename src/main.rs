@@ -4,7 +4,7 @@ mod network;
 
 mod client;
 use client::Config;
-use network::Subnets;
+use network::{ListenerAddr, Subnets};
 
 mod options;
 
@@ -95,11 +95,35 @@ fn options_to_config(opt: &options::Options) -> Result<Config, ConfigError> {
 
     let remote = opt.remote.to_owned();
 
+    let listen = {
+        let mut listen = Vec::new();
+
+        opt.listen
+            .iter()
+            .map(|l| ListenerAddr {
+                addr: l.to_owned(),
+                protocol: network::Protocol::Tcp,
+            })
+            .for_each(|l| listen.push(l));
+
+        if opt.udp {
+            opt.listen
+                .iter()
+                .map(|l| ListenerAddr {
+                    addr: l.to_owned(),
+                    protocol: network::Protocol::Udp,
+                })
+                .for_each(|l| listen.push(l));
+        }
+
+        listen
+    };
+
     let config = Config {
         includes,
         excludes,
         remote,
-        listen: opt.listen.clone(),
+        listen,
         socks_addr: opt.socks,
         firewall: opt.firewall,
     };

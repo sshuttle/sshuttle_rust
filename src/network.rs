@@ -1,4 +1,11 @@
-use std::{error::Error, fmt::Display, net::IpAddr, net::Ipv4Addr, net::Ipv6Addr, str::FromStr};
+use std::{
+    error::Error,
+    fmt::{Display, Formatter},
+    net::IpAddr,
+    net::Ipv6Addr,
+    net::{Ipv4Addr, SocketAddr},
+    str::FromStr,
+};
 
 use dns_lookup::getaddrinfo;
 use regex::Match;
@@ -328,6 +335,37 @@ impl FromStr for SubnetsV6 {
             .collect();
 
         Ok(SubnetsV6(subnets?))
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum Protocol {
+    Tcp,
+    Udp,
+}
+
+#[derive(Clone)]
+pub struct ListenerAddr {
+    pub protocol: Protocol,
+    pub addr: SocketAddr,
+}
+
+impl ListenerAddr {
+    pub fn ip(&self) -> IpAddr {
+        self.addr.ip()
+    }
+    pub fn port(&self) -> u16 {
+        self.addr.port()
+    }
+}
+
+impl Display for ListenerAddr {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.addr)?;
+        match self.protocol {
+            Protocol::Tcp => write!(f, "/tcp"),
+            Protocol::Udp => write!(f, "/udp"),
+        }
     }
 }
 

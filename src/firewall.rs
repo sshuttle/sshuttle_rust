@@ -1,7 +1,7 @@
 use std::{
     error::Error,
     fmt::Display,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
     os::unix::prelude::AsRawFd,
 };
 
@@ -16,8 +16,8 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
     commands::Commands,
-    network::SubnetsV4,
     network::{Family, SubnetsFamily, SubnetsV6},
+    network::{ListenerAddr, SubnetsV4},
 };
 
 pub mod nat;
@@ -81,6 +81,10 @@ pub trait Firewall {
         Ok(())
     }
 
+    fn setup_udp_socket(&self, _l: &UdpSocket) -> Result<(), FirewallError> {
+        Ok(())
+    }
+
     fn get_dst_addr(&self, s: &TcpStream) -> Result<SocketAddr, FirewallError> {
         get_dst_addr_sockopt(s)
     }
@@ -91,7 +95,7 @@ pub trait Firewall {
 
 pub struct FirewallSubnetConfig<T: SubnetsFamily> {
     pub enable: bool,
-    pub port: u16,
+    pub listener: ListenerAddr,
     pub includes: T,
     pub excludes: T,
 }
