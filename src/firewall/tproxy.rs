@@ -1,11 +1,11 @@
 use std::net::SocketAddr;
-use std::net::UdpSocket;
 use std::os::unix::prelude::AsRawFd;
 
 use nix::sys::socket::setsockopt;
 use nix::sys::socket::sockopt::IpTransparent;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
+use tokio::net::UdpSocket;
 
 use crate::network::ListenerAddr;
 use crate::network::Ports;
@@ -79,8 +79,8 @@ impl TProxyFirewall {
             ipm!("-I", "PREROUTING", "1", "-j", &tproxy_chain);
         }
 
-        ipm!("-A", &mark_chain, "-j", "RETURN", "-m", "addrtype", "--dst-type", "LOCAL");
-        ipm!("-A", &tproxy_chain, "-j", "RETURN", "-m", "addrtype", "--dst-type", "LOCAL");
+        ipm!("-A", &mark_chain, "-j", "RETURN", "-m", "addrtype", "--dst-type", "LOCAL", "-m", protocol, "-p", protocol);
+        ipm!("-A", &tproxy_chain, "-j", "RETURN", "-m", "addrtype", "--dst-type", "LOCAL", "-m", protocol, "-p", protocol);
 
         ipm!("-A", &divert_chain, "-j", "MARK", "--set-mark", tmark);
         ipm!("-A", &divert_chain, "-j", "ACCEPT");
@@ -187,7 +187,7 @@ impl Firewall for TProxyFirewall {
     fn setup_udp_socket(&self, l: &UdpSocket) -> Result<(), FirewallError> {
         let fd = l.as_raw_fd();
         setsockopt(fd, IpTransparent, &true)?;
-        l.set_nonblocking(true)?;
+        // l.set_nonblocking(true)?;
 
         let value = 1u8;
         let value_ptr: *const libc::c_void = &value as *const u8 as *const libc::c_void;

@@ -6,7 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-nix = { version = "0.24.1", features = ["socket"] }
+nix = { version = "0.24.1", features = [
+    "socket",
+    "net",
+], path = "/home/brian/tree/3rdparty/nix" }
 clap = { version = "3.2.12", features = ["derive"] }
 regex = "1"
 dns-lookup = "1.0.8"

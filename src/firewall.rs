@@ -1,7 +1,7 @@
 use std::{
     error::Error,
     fmt::Display,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::prelude::AsRawFd,
 };
 
@@ -12,7 +12,7 @@ use nix::{
         sockopt::{Ip6tOriginalDst, OriginalDst},
     },
 };
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
 use crate::{
     commands::Commands,

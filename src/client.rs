@@ -1,5 +1,5 @@
 use std::io::IoSliceMut;
-use std::net::{IpAddr, UdpSocket};
+use std::net::IpAddr;
 use std::os::unix::prelude::AsRawFd;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,9 +7,15 @@ use std::{error::Error, fmt::Display, net::SocketAddr};
 
 use fast_socks5::client::Socks5Stream;
 
-use nix::sys::socket::{recvmsg, MsgFlags, RecvMsg};
-use tokio::io::copy_bidirectional;
-use tokio::net::{TcpListener, TcpStream};
+use nix::cmsg_space;
+use nix::errno::Errno;
+use nix::sys::socket::sockopt::IpTransparent;
+use nix::sys::socket::{
+    bind, recvmsg, setsockopt, socket, AddressFamily, ControlMessageOwned, MsgFlags, RecvMsg,
+    SockFlag, SockType, SockaddrIn,
+};
+use tokio::io::{copy_bidirectional, Interest};
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinError;
@@ -350,29 +356,120 @@ async fn listen_udp(
     l_addr: ListenerAddr,
     _socks_addr: SocketAddr,
 ) -> Result<(), ClientError> {
+    let _firewall = Arc::clone(firewall);
     let firewall = Arc::clone(firewall);
-    tokio::task::spawn_blocking(move || {
-        // let firewall = Arc::clone(firewall);
-        let local = UdpSocket::bind(l_addr.addr)?;
-        local.set_nonblocking(false)?;
-        firewall.setup_udp_socket(&local)?;
-        std::thread::spawn(move || loop {
+    let local = UdpSocket::bind(l_addr.addr).await?;
+    // local.set_nonblocking(false)?;
+    firewall.setup_udp_socket(&local)?;
+
+    let _handle = tokio::spawn(async move {
+        loop {
+            // let firewall = Arc::clone(&firewall);
+            // let mut buf = [0u8; 65535];
+
+            // let (len, addr) = local.recv_from(&mut buf).await.unwrap();
+            // let l_addr = l_addr.clone();
+
             let mut buf = vec![0u8; 1024];
-            let ioslice = IoSliceMut::new(&mut buf);
-            let mut cmsg_buffer = vec![0u8; 24];
-            println!("{l_addr} UDP waiting");
-            let cmsg: RecvMsg<nix::sys::socket::SockAddr> = recvmsg(
+            let mut iov = [IoSliceMut::new(&mut buf)];
+
+            let mut cmsg = cmsg_space!(libc::in6_addr);
+
+            log::debug!("udp readable?");
+            local.readable().await.unwrap();
+
+            log::debug!("recvmesg");
+            let msg: Result<RecvMsg<()>, _> = recvmsg(
                 local.as_raw_fd(),
-                &mut [ioslice],
-                Some(&mut cmsg_buffer),
+                &mut iov,
+                Some(&mut cmsg),
                 MsgFlags::empty(),
-            )
-            .unwrap();
-            println!("{l_addr} UDP {cmsg:?}");
-        });
-        Ok(())
-    })
-    .await?
+            );
+            log::debug!("recvmsg: {msg:?}", msg = msg);
+
+            let msg = match msg {
+                Ok(msg) => msg,
+                Err(Errno::EAGAIN) => {
+                    continue;
+                }
+                Err(err) => {
+                    log::error!("recvmsg failed: {err}");
+                    continue;
+                }
+            };
+
+            for cmsg in msg.cmsgs() {
+                match cmsg {
+                    ControlMessageOwned::Ipv4RecvOrigDstAddr(addr) => {
+                        println!("IPv4 {addr:?}");
+                    }
+                    ControlMessageOwned::Ipv6RecvOrigDstAddr(addr) => {
+                        println!("IPv6 {addr:?}");
+                    }
+                    _ => panic!("unexpected additional control msg"),
+                }
+            }
+        }
+    });
+    Ok(())
+
+    // use nix::sys::socket::sockopt::Ipv4RecvOrigDstAddr;
+    // let s: SockaddrIn = "127.0.0.1:12300".parse().unwrap();
+    // let receive = socket(
+    //     AddressFamily::Inet,
+    //     SockType::Datagram,
+    //     SockFlag::empty(),
+    //     None,
+    // )
+    // .expect("receive socket failed");
+    // setsockopt(receive, IpTransparent, &true).unwrap();
+    // bind(receive, &s).expect("bind failed");
+    // // let sa: SockaddrIn = getsockname(receive).expect("getsockname failed");
+    // setsockopt(receive, Ipv4RecvOrigDstAddr, &true).expect("setsockopt IP_RECVDSTADDR failed");
+    // // let value = 1u8;
+    // // let value_ptr: *const libc::c_void = &value as *const u8 as *const libc::c_void;
+    // // unsafe {
+    // //     libc::setsockopt(
+    // //         receive,
+    // //         libc::IPPROTO_IP,
+    // //         libc::IP_RECVORIGDSTADDR,
+    // //         value_ptr,
+    // //         std::mem::size_of::<u8>() as u32,
+    // //     )
+    // // };
+
+    // tokio::spawn(async move {
+    //     loop {
+    //         // let iov = IoSliceMut::new(&mut buf);
+    //         // let mut cmsg = vec![0u8; 48];
+    //         let l_addr = l_addr.clone();
+    //         println!("{l_addr} UDP waiting");
+    //         let _: Result<_, ClientError> = tokio::task::spawn_blocking(move || {
+    //             let mut buf = vec![0u8; 1024];
+    //             let mut iov = [IoSliceMut::new(&mut buf)];
+
+    //             let mut cmsg = cmsg_space!(libc::in_addr);
+    //             let msg: RecvMsg<()> =
+    //                 recvmsg(receive, &mut iov, Some(&mut cmsg), MsgFlags::empty()).unwrap();
+    //             for cmsg in msg.cmsgs() {
+    //                 match cmsg {
+    //                     ControlMessageOwned::Ipv4RecvOrigDstAddr(addr) => {
+    //                         println!("{addr:?}");
+    //                     }
+    //                     _ => panic!("unexpected additional control msg"),
+    //                 }
+    //             }
+    //             println!("{l_addr} UDP {msg:?}");
+    //             Ok(())
+    //         })
+    //         .await
+    //         .unwrap();
+    //     }
+    // });
+    // // })
+    // // .await
+    // // .unwrap();
+    // Ok(())
 }
 
 async fn handle_tcp_client(

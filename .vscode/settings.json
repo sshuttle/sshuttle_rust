@@ -2,6 +2,7 @@
     "cSpell.words": [
         "addrinfo",
         "addrtype",
+        "cmsg",
         "dport",
         "Errno",
         "familys",
@@ -16,6 +17,7 @@
         "lport",
         "noncommercially",
         "PREROUTING",
+        "recvmsg",
         "RECVORIGDSTADDR",
         "reprs",
         "rustfmt",
