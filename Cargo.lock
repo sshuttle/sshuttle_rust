@@ -427,6 +427,7 @@ dependencies = [
  "log",
  "nix 0.24.1",
  "regex",
+ "thiserror",
  "tokio",
 ]
 

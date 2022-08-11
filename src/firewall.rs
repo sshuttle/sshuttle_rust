@@ -56,24 +56,31 @@ fn get_dst_addr_sockopt(s: &TcpStream) -> Result<SocketAddr, FirewallError> {
     let addr = match s.local_addr()? {
         SocketAddr::V4(_) => {
             let a = getsockopt(s.as_raw_fd(), OriginalDst).unwrap();
-            let addr = Ipv4Addr::from(u32::from_be(a.sin_addr.s_addr));
-            let port = a.sin_port.to_be();
-            SocketAddr::new(IpAddr::V4(addr), port)
+            raw_to_socket_addr_v4(a)
         }
         SocketAddr::V6(_) => {
             let a = getsockopt(s.as_raw_fd(), Ip6tOriginalDst).unwrap();
-            let mut b = a.sin6_addr.s6_addr;
-            let u16 = unsafe { std::slice::from_raw_parts_mut(b.as_mut_ptr() as *mut u8, 8) };
-            for i in u16.iter_mut() {
-                *i = i.to_be();
-            }
-
-            let addr = Ipv6Addr::from(b);
-            let port = a.sin6_port.to_be();
-            SocketAddr::new(IpAddr::V6(addr), port)
+            raw_to_socket_addr_v6(a)
         }
     };
     Ok(addr)
+}
+
+pub fn raw_to_socket_addr_v4(a: libc::sockaddr_in) -> SocketAddr {
+    let addr = Ipv4Addr::from(u32::from_be(a.sin_addr.s_addr));
+    let port = a.sin_port.to_be();
+    SocketAddr::new(IpAddr::V4(addr), port)
+}
+
+pub fn raw_to_socket_addr_v6(a: libc::sockaddr_in6) -> SocketAddr {
+    let mut b = a.sin6_addr.s6_addr;
+    let u16 = unsafe { std::slice::from_raw_parts_mut(b.as_mut_ptr() as *mut u8, 8) };
+    for i in u16.iter_mut() {
+        *i = i.to_be();
+    }
+    let addr = Ipv6Addr::from(b);
+    let port = a.sin6_port.to_be();
+    SocketAddr::new(IpAddr::V6(addr), port)
 }
 
 pub trait Firewall {
