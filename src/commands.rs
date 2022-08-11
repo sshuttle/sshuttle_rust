@@ -1,6 +1,6 @@
 use std::slice::Iter;
 
-use crate::command::{CommandError, CommandLine};
+use crate::command::{CommandError, CommandErrorKind, CommandLine};
 
 #[derive(Debug)]
 pub struct Command {
@@ -15,7 +15,7 @@ impl Commands {
     pub async fn run_all(&self) -> Result<(), CommandError> {
         for cmd in &self.0 {
             if let Err(err) = cmd.line.run().await {
-                if let CommandError::BadExitCode { .. } = err {
+                if let CommandErrorKind::BadExitCode { .. } = err.kind {
                     if cmd.ignore_errors {
                         log::info!("Ignoring error: {}", err);
                     } else {
