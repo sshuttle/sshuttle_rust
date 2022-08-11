@@ -9,12 +9,8 @@ use fast_socks5::client::Socks5Stream;
 
 use nix::cmsg_space;
 use nix::errno::Errno;
-use nix::sys::socket::sockopt::IpTransparent;
-use nix::sys::socket::{
-    bind, recvmsg, setsockopt, socket, AddressFamily, ControlMessageOwned, MsgFlags, RecvMsg,
-    SockFlag, SockType, SockaddrIn,
-};
-use tokio::io::{copy_bidirectional, Interest};
+use nix::sys::socket::{recvmsg, ControlMessageOwned, MsgFlags, RecvMsg};
+use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::select;
 use tokio::sync::mpsc;
@@ -400,10 +396,10 @@ async fn listen_udp(
 
             for cmsg in msg.cmsgs() {
                 match cmsg {
-                    ControlMessageOwned::Ipv4RecvOrigDstAddr(addr) => {
+                    ControlMessageOwned::Ipv4OrigDstAddr(addr) => {
                         println!("IPv4 {addr:?}");
                     }
-                    ControlMessageOwned::Ipv6RecvOrigDstAddr(addr) => {
+                    ControlMessageOwned::Ipv6OrigDstAddr(addr) => {
                         println!("IPv6 {addr:?}");
                     }
                     _ => panic!("unexpected additional control msg"),
