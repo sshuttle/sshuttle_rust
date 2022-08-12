@@ -1,6 +1,4 @@
 use std::{
-    error::Error,
-    fmt::Display,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::prelude::AsRawFd,
 };
@@ -12,6 +10,7 @@ use nix::{
         sockopt::{Ip6tOriginalDst, OriginalDst},
     },
 };
+use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
 use crate::{
@@ -23,43 +22,26 @@ use crate::{
 pub mod nat;
 pub mod tproxy;
 
-#[derive(Debug)]
-pub struct FirewallError {
-    message: String,
-}
+#[derive(Error, Debug)]
+pub enum FirewallError {
+    #[error("Errno error `{0}`")]
+    Errno(#[from] Errno),
 
-impl Display for FirewallError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
+    #[error("IO Error `{0}`")]
+    Io(#[from] std::io::Error),
 
-impl Error for FirewallError {}
-
-impl From<Errno> for FirewallError {
-    fn from(err: Errno) -> Self {
-        FirewallError {
-            message: format!("Errno {}", err),
-        }
-    }
-}
-
-impl From<std::io::Error> for FirewallError {
-    fn from(err: std::io::Error) -> Self {
-        FirewallError {
-            message: format!("std::io::Error: {}", err),
-        }
-    }
+    #[error("Not supported `{0}`")]
+    NotSupported(String),
 }
 
 fn get_dst_addr_sockopt(s: &TcpStream) -> Result<SocketAddr, FirewallError> {
     let addr = match s.local_addr()? {
         SocketAddr::V4(_) => {
-            let a = getsockopt(s.as_raw_fd(), OriginalDst).unwrap();
+            let a = getsockopt(s.as_raw_fd(), OriginalDst)?;
             raw_to_socket_addr_v4(a)
         }
         SocketAddr::V6(_) => {
-            let a = getsockopt(s.as_raw_fd(), Ip6tOriginalDst).unwrap();
+            let a = getsockopt(s.as_raw_fd(), Ip6tOriginalDst)?;
             raw_to_socket_addr_v6(a)
         }
     };

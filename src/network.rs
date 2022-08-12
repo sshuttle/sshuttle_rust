@@ -1,5 +1,4 @@
 use std::{
-    error::Error,
     fmt::{Display, Formatter},
     net::IpAddr,
     net::Ipv6Addr,
@@ -9,6 +8,7 @@ use std::{
 
 use dns_lookup::getaddrinfo;
 use regex::Match;
+use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Family {
@@ -30,18 +30,17 @@ pub enum Family {
 // const IPV4: i32 = 2;
 const STREAM: i32 = 1;
 
-#[derive(Debug)]
-pub struct NetworkParseError {
-    message: String,
-}
+#[derive(Error, Debug)]
+pub enum NetworkParseError {
+    #[error("Input Error `{0}`")]
+    InputError(String),
 
-impl Display for NetworkParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
+    #[error("IO Error `{0}`")]
+    Io(#[from] std::io::Error),
 
-impl Error for NetworkParseError {}
+    #[error("Regular Expression Error `{0}`")]
+    Regex(#[from] regex::Error),
+}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Ports {
@@ -95,8 +94,8 @@ impl SubnetFamily for SubnetV6 {
 }
 
 fn parse_int<T: FromStr>(s: Match) -> Result<T, NetworkParseError> {
-    s.as_str().parse::<T>().map_err(|_| NetworkParseError {
-        message: format!("Could not parse '{}' as an integer", s.as_str()),
+    s.as_str().parse::<T>().map_err(|_| {
+        NetworkParseError::InputError(format!("Could not parse '{}' as an integer", s.as_str()))
     })
 }
 
@@ -180,9 +179,9 @@ impl FromStr for Subnets {
             r"^((?:\*\.)?[\w\.\-]+)(?:/(\d+))?(?::(\d+)(?:-(\d+))?)?$"
         };
 
-        let re = regex::Regex::new(rx).unwrap();
-        let caps = re.captures(s).ok_or(NetworkParseError {
-            message: format!("Invalid subnet format: {}", s),
+        let re = regex::Regex::new(rx)?;
+        let caps = re.captures(s).ok_or_else(|| {
+            NetworkParseError::InputError(format!("Invalid subnet format: {}", s))
         })?;
 
         let host = caps[1].to_string();
@@ -190,27 +189,32 @@ impl FromStr for Subnets {
         let fport = caps.get(3).map(parse_int).transpose()?;
         let lport = caps.get(4).map(parse_int).transpose()?;
 
-        let addrinfo: Vec<_> = getaddrinfo(Some(host.as_str()), None, None)
-            .map_err(|err| NetworkParseError {
-                message: format!("Invalid hostname {host}: {err:?}"),
-            })?
-            .map(|x| x.unwrap())
-            .filter(|a| a.socktype == STREAM)
-            .collect();
+        let addrinfo: Result<Vec<dns_lookup::AddrInfo>, std::io::Error> =
+            getaddrinfo(Some(host.as_str()), None, None)
+                .map_err(|err| {
+                    NetworkParseError::InputError(format!("Invalid hostname {host}: {err:?}"))
+                })?
+                .filter(|a| {
+                    if let Ok(b) = a {
+                        b.socktype == STREAM
+                    } else {
+                        true
+                    }
+                })
+                .collect();
+        let addrinfo = addrinfo?;
 
         if let Some(cidr) = cidr {
             let addr_v6: Vec<_> = addrinfo.iter().filter(|a| a.sockaddr.is_ipv4()).collect();
             let addr_v4: Vec<_> = addrinfo.iter().filter(|a| a.sockaddr.is_ipv6()).collect();
 
             if !addr_v6.is_empty() && !addr_v4.is_empty() {
-                return Err(NetworkParseError {
-                    message: format!(
-                        "{host} has IPv4 and IPv6 addresses, so the mask \
+                return Err(NetworkParseError::InputError(format!(
+                    "{host} has IPv4 and IPv6 addresses, so the mask \
                         of /{cidr} is not supported. Specify the IP \
                         addresses directly if you wish to specify \
                         a mask."
-                    ),
-                });
+                )));
             }
 
             if addr_v6.len() > 1 || addr_v4.len() > 1 {
@@ -235,13 +239,11 @@ impl FromStr for Subnets {
                 };
 
                 if cidr_to_use > max_cidr {
-                    return Err(NetworkParseError {
-                        message: format!(
-                            "Invalid CIDR mask: {}. Valid CIDR masks \
+                    return Err(NetworkParseError::InputError(format!(
+                        "Invalid CIDR mask: {}. Valid CIDR masks \
                             are between 0 and {}.",
-                            cidr_to_use, max_cidr
-                        ),
-                    });
+                        cidr_to_use, max_cidr
+                    )));
                 };
 
                 let ports = match (fport, lport) {
@@ -293,9 +295,10 @@ impl FromStr for SubnetsV4 {
                     cidr: s.cidr,
                     ports: s.ports,
                 }),
-                _ => Err(NetworkParseError {
-                    message: format!("Invalid family, expected IPv4: {:?}", s),
-                }),
+                _ => Err(NetworkParseError::InputError(format!(
+                    "Invalid family, expected IPv4: {:?}",
+                    s
+                ))),
             })
             .collect();
 
@@ -328,9 +331,10 @@ impl FromStr for SubnetsV6 {
                     cidr: s.cidr,
                     ports: s.ports,
                 }),
-                _ => Err(NetworkParseError {
-                    message: format!("Invalid family, expected IPv6: {:?}", s),
-                }),
+                _ => Err(NetworkParseError::InputError(format!(
+                    "Invalid family, expected IPv6: {:?}",
+                    s
+                ))),
             })
             .collect();
 
@@ -370,6 +374,7 @@ impl Display for ListenerAddr {
     }
 }
 
+#[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -187,7 +187,6 @@ impl Firewall for TProxyFirewall {
     fn setup_udp_socket(&self, l: &UdpSocket) -> Result<(), FirewallError> {
         let fd = l.as_raw_fd();
         setsockopt(fd, IpTransparent, &true)?;
-        // l.set_nonblocking(true)?;
 
         let value = 1u8;
         let value_ptr: *const libc::c_void = &value as *const u8 as *const libc::c_void;
@@ -254,6 +253,7 @@ impl Firewall for TProxyFirewall {
     }
 }
 
+#[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use crate::{

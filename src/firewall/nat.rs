@@ -20,9 +20,9 @@ impl NatFirewall {
         commands: &mut Commands,
     ) -> Result<(), FirewallError> {
         if !matches!(fconfig.listener.protocol, Protocol::Tcp) {
-            return Err(FirewallError {
-                message: "Only TCP is supported for NAT".to_string(),
-            });
+            return Err(FirewallError::NotSupported(
+                "Only TCP is supported for NAT".to_string()),
+            );
         }
 
         let port = fconfig.listener.port().to_string();
@@ -103,9 +103,9 @@ impl NatFirewall {
         commands: &mut Commands,
     ) -> Result<(), FirewallError> {
         if !matches!(fconfig.listener.protocol, Protocol::Tcp) {
-            return Err(FirewallError {
-                message: "Only TCP is supported for NAT".to_string(),
-            });
+            return Err(FirewallError::NotSupported(
+                "Only TCP is supported for NAT".to_string()),
+            );
         }
 
         let port = fconfig.listener.port().to_string();
@@ -176,6 +176,7 @@ impl Firewall for NatFirewall {
     }
 }
 
+#[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use crate::{

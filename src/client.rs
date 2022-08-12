@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fast_socks5::client::Socks5Stream;
+use fast_socks5::SocksError;
 
 use nix::errno::Errno;
 use thiserror::Error;
@@ -33,20 +34,26 @@ pub struct Config {
 
 #[derive(Error, Debug)]
 pub enum ClientError {
-    #[error("Firewall Error")]
+    #[error("Firewall Error `{0}`")]
     Firewall(#[from] FirewallError),
 
-    #[error("Join Error")]
+    #[error("Join Error `{0}`")]
     Join(#[from] JoinError),
 
-    #[error("Command Error")]
+    #[error("Command Error `{0}`")]
     Command(#[from] CommandError),
 
-    #[error("IO Error")]
+    #[error("IO Error `{0}`")]
     Io(#[from] std::io::Error),
 
-    #[error("Errno error")]
+    #[error("Errno error `{0}`")]
     Errno(#[from] Errno),
+
+    #[error("Socks5 Error `{0}`")]
+    Socks5(#[from] SocksError),
+
+    #[error("Error setting up Ctrl-C handler `{0}`")]
+    CtrlC(#[from] ctrlc::Error),
 }
 
 pub async fn main(config: &Config) -> Result<(), ClientError> {
@@ -54,11 +61,11 @@ pub async fn main(config: &Config) -> Result<(), ClientError> {
 
     let tx_clone = control_tx.clone();
     ctrlc::set_handler(move || {
+        #[allow(clippy::expect_used)]
         tx_clone
             .blocking_send(Message::Shutdown)
             .expect("Could not send signal on channel.")
-    })
-    .expect("Error setting Ctrl-C handler");
+    })?;
 
     let firewall_config = get_firewall_config(config);
     let firewall = get_firewall(config)?;
@@ -295,13 +302,22 @@ async fn listen_tcp(
     let listener = TcpListener::bind(l_addr.addr).await?;
     firewall.setup_tcp_listener(&listener)?;
 
-    let _handle = tokio::spawn(async move {
+    let _handle: JoinHandle<Result<(), ClientError>> = tokio::spawn(async move {
         loop {
             let firewall = Arc::clone(&firewall);
-            let (socket, _) = listener.accept().await.unwrap();
+            let socket = match listener.accept().await {
+                Ok((socket, _)) => socket,
+                Err(err) => break Err(err.into()),
+            };
             let l_addr = l_addr.clone();
             tokio::spawn(async move {
-                handle_tcp_client(socket, &l_addr, socks_addr, firewall).await;
+                handle_tcp_client(socket, &l_addr, socks_addr, firewall)
+                    .await
+                    .map_err(|err| {
+                        log::error!("handle_tcp_client failed: {err}");
+                        err
+                    })
+                    .ok();
             });
         }
     });
@@ -313,12 +329,12 @@ async fn handle_tcp_client(
     l_addr: &ListenerAddr,
     socks_addr: SocketAddr,
     firewall: Arc<dyn Firewall + Send + Sync>,
-) {
+) -> Result<(), ClientError> {
     let mut local = socket;
-    let local_addr = local.peer_addr().unwrap();
+    let local_addr = local.peer_addr()?;
     log::debug!("new connection from: {}", local_addr);
 
-    let remote_addr = firewall.get_dst_addr(&local).unwrap();
+    let remote_addr = firewall.get_dst_addr(&local)?;
     log::info!("{l_addr} got connection from {local_addr} to {remote_addr}");
 
     let (addr_str, port) = {
@@ -329,14 +345,14 @@ async fn handle_tcp_client(
 
     let mut remote_config = fast_socks5::client::Config::default();
     remote_config.set_skip_auth(false);
-    let mut remote = Socks5Stream::connect(socks_addr, addr_str, port, remote_config)
-        .await
-        .unwrap();
+    let mut remote = Socks5Stream::connect(socks_addr, addr_str, port, remote_config).await?;
 
     let result = copy_bidirectional(&mut local, &mut remote).await;
     // let result = my_bidirectional_copy(&mut local, &mut remote).await;
 
     log::debug!("copy_bidirectional result: {:?}", result);
+
+    Ok(())
 }
 
 // async fn my_bidirectional_copy(

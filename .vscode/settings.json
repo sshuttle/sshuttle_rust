@@ -27,12 +27,16 @@
         "setsockopt",
         "sockaddr",
         "sockopt",
+        "socksstream",
         "socktype",
         "sshuttle",
         "Stdio",
         "subnetport",
         "SWIDTHS",
+        "tcpstream",
+        "thiserror",
         "tmark",
-        "TPROXY"
+        "TPROXY",
+        "transproxy"
     ]
 }
