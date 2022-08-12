@@ -341,6 +341,7 @@ impl FromStr for SubnetsV6 {
 #[derive(Clone, Copy)]
 pub enum Protocol {
     Tcp,
+    #[allow(dead_code)]
     Udp,
 }
 

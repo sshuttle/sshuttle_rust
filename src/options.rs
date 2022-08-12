@@ -54,10 +54,6 @@ pub struct Options {
     /// What kind of firewall to use
     #[clap(short, long, arg_enum, default_value_t = FirewallType::Nat)]
     pub firewall: FirewallType,
-
-    /// Enable UDP support
-    #[clap(short, long)]
-    pub udp: bool,
 }
 
 pub fn parse() -> Options {

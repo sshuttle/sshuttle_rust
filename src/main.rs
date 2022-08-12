@@ -106,16 +106,6 @@ fn options_to_config(opt: &options::Options) -> Result<Config, ConfigError> {
             })
             .for_each(|l| listen.push(l));
 
-        if opt.udp {
-            opt.listen
-                .iter()
-                .map(|l| ListenerAddr {
-                    addr: l.to_owned(),
-                    protocol: network::Protocol::Udp,
-                })
-                .for_each(|l| listen.push(l));
-        }
-
         listen
     };
 
