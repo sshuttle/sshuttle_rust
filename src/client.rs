@@ -64,11 +64,11 @@ pub async fn main(config: &Config) -> Result<(), ClientError> {
         #[allow(clippy::expect_used)]
         tx_clone
             .blocking_send(Message::Shutdown)
-            .expect("Could not send signal on channel.")
+            .expect("Could not send signal on channel.");
     })?;
 
     let firewall_config = get_firewall_config(config);
-    let firewall = get_firewall(config)?;
+    let firewall = get_firewall(config);
     let setup_commands = firewall.setup_firewall(&firewall_config)?;
     let shutdown_commands = firewall.restore_firewall(&firewall_config)?;
 
@@ -184,12 +184,11 @@ async fn run_everything(
 //     }
 // }
 
-fn get_firewall(config: &Config) -> Result<Box<dyn Firewall + Send + Sync>, ClientError> {
-    let firewall: Box<dyn Firewall + Send + Sync> = match config.firewall {
+fn get_firewall(config: &Config) -> Box<dyn Firewall + Send + Sync> {
+    match config.firewall {
         FirewallType::Nat => Box::new(crate::firewall::nat::NatFirewall::new()),
         FirewallType::TProxy => Box::new(crate::firewall::tproxy::TProxyFirewall::new()),
-    };
-    Ok(firewall)
+    }
 }
 
 fn get_firewall_config(config: &Config) -> FirewallConfig {

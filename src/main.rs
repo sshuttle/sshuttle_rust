@@ -1,10 +1,11 @@
 // #![warn(missing_docs)]
-// #![deny(clippy::pedantic)]
+#![deny(clippy::pedantic)]
 // #![deny(clippy::nursery)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
-// #![allow(clippy::module_name_repetitions)]
-// #![allow(clippy::use_self)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::use_self)]
+#![allow(clippy::unused_self)]
 
 use std::{error::Error, fmt::Display, process::ExitCode};
 
@@ -101,7 +102,7 @@ fn options_to_config(opt: &options::Options) -> Result<Config, ConfigError> {
         });
     }
 
-    let remote = opt.remote.to_owned();
+    let remote = opt.remote.clone();
 
     let listen = {
         let mut listen = Vec::new();
@@ -109,7 +110,7 @@ fn options_to_config(opt: &options::Options) -> Result<Config, ConfigError> {
         opt.listen
             .iter()
             .map(|l| ListenerAddr {
-                addr: l.to_owned(),
+                addr: *l,
                 protocol: network::Protocol::Tcp,
             })
             .for_each(|l| listen.push(l));

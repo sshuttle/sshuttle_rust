@@ -16,18 +16,18 @@ impl NatFirewall {
     fn setup_family<T: SubnetsFamily>(
         &self,
         config: &FirewallConfig,
-        fconfig: &FirewallSubnetConfig<T>,
+        subnet_config: &FirewallSubnetConfig<T>,
         commands: &mut Commands,
     ) -> Result<(), FirewallError> {
-        if !matches!(fconfig.listener.protocol, Protocol::Tcp) {
+        if !matches!(subnet_config.listener.protocol, Protocol::Tcp) {
             return Err(FirewallError::NotSupported(
                 "Only TCP is supported for NAT".to_string()),
             );
         }
 
-        let port = fconfig.listener.port().to_string();
+        let port = subnet_config.listener.port().to_string();
         let chain = format!("sshuttle-{}", port);
-        let family = fconfig.family();
+        let family = subnet_config.family();
 
         macro_rules! ipt {
             ( $( $e:expr),* ) => {
@@ -65,27 +65,27 @@ impl NatFirewall {
 
         ipt!("-A", &chain, "-j", "RETURN", "-m", "addrtype", "--dst-type", "LOCAL");
 
-        for subnet in fconfig.excludes.iter() {
+        for subnet in subnet_config.excludes.iter() {
             let subnet_str = subnet.subnet_str();
             let ports: Vec<String> = match subnet.ports() {
                 Ports::Single(port) => vec!["--dport".to_string(), port.to_string()],
-                Ports::Range(fport,lport) => vec!["--dport".to_string(), format!("{fport}:{lport}")],
+                Ports::Range(first, last) => vec!["--dport".to_string(), format!("{first}:{last}")],
                 Ports::None => vec![],
             };
-            let mut ports = ports.iter().map(|p| p.as_str()).collect();
+            let mut ports = ports.iter().map(std::string::String::as_str).collect();
             let mut cmd = vec!["-A", &chain, "-j", "RETURN", "--dest", &subnet_str, "-p", "tcp"];
             cmd.append(&mut ports);
             ipt_vec!(cmd);
         }
 
-        for subnet in fconfig.includes.iter() {
+        for subnet in subnet_config.includes.iter() {
             let subnet_str = subnet.subnet_str();
             let ports: Vec<String> = match subnet.ports() {
                 Ports::Single(port) => vec!["--dport".to_string(), port.to_string()],
-                Ports::Range(fport,lport) => vec!["--dport".to_string(), format!("{fport}:{lport}")],
+                Ports::Range(first, last) => vec!["--dport".to_string(), format!("{first}:{last}")],
                 Ports::None => vec![],
             };
-            let mut ports = ports.iter().map(|p| p.as_str()).collect();
+            let mut ports = ports.iter().map(std::string::String::as_str).collect();
             let mut cmd = vec!["-A", &chain, "-j", "REDIRECT", "--dest", &subnet_str, "-p", "tcp"];
             cmd.append(&mut ports);
             cmd.append(&mut vec!["--to-ports", &port]);
@@ -99,18 +99,18 @@ impl NatFirewall {
     fn restore_family<T: SubnetsFamily>(
         &self,
         config: &FirewallConfig,
-        fconfig: &FirewallSubnetConfig<T>,
+        subnet_config: &FirewallSubnetConfig<T>,
         commands: &mut Commands,
     ) -> Result<(), FirewallError> {
-        if !matches!(fconfig.listener.protocol, Protocol::Tcp) {
+        if !matches!(subnet_config.listener.protocol, Protocol::Tcp) {
             return Err(FirewallError::NotSupported(
                 "Only TCP is supported for NAT".to_string()),
             );
         }
 
-        let port = fconfig.listener.port().to_string();
+        let port = subnet_config.listener.port().to_string();
         let chain = format!("sshuttle-{}", port);
-        let family = fconfig.family();
+        let family = subnet_config.family();
 
         macro_rules! ipt {
             ( $( $e:expr),* ) => {
@@ -148,10 +148,10 @@ impl Firewall for NatFirewall {
         for family in &config.listeners {
             match family {
                 super::FirewallListenerConfig::Ipv4(ip) => {
-                    self.setup_family(config, ip, &mut commands)?
+                    self.setup_family(config, ip, &mut commands)?;
                 }
                 super::FirewallListenerConfig::Ipv6(ip) => {
-                    self.setup_family(config, ip, &mut commands)?
+                    self.setup_family(config, ip, &mut commands)?;
                 }
             }
         }
@@ -164,10 +164,10 @@ impl Firewall for NatFirewall {
         for family in &config.listeners {
             match family {
                 super::FirewallListenerConfig::Ipv4(ip) => {
-                    self.restore_family(config, ip, &mut commands)?
+                    self.restore_family(config, ip, &mut commands)?;
                 }
                 super::FirewallListenerConfig::Ipv6(ip) => {
-                    self.restore_family(config, ip, &mut commands)?
+                    self.restore_family(config, ip, &mut commands)?;
                 }
             }
         }
@@ -219,7 +219,7 @@ mod tests {
             .unwrap();
         assert_eq!(commands.len(), expected_ipv4.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv4.iter()) {
-            let split: Vec<String> = expected_line.split(' ').map(|s| s.to_owned()).collect();
+            let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
             let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
@@ -257,7 +257,7 @@ mod tests {
             .unwrap();
         assert_eq!(commands.len(), expected_ipv6.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv6.iter()) {
-            let split: Vec<String> = expected_line.split(' ').map(|s| s.to_owned()).collect();
+            let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
             let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
@@ -293,7 +293,7 @@ mod tests {
             .unwrap();
         assert_eq!(commands.len(), expected_ipv4.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv4.iter()) {
-            let split: Vec<String> = expected_line.split(' ').map(|s| s.to_owned()).collect();
+            let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
             let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
@@ -328,7 +328,7 @@ mod tests {
             .unwrap();
         assert_eq!(commands.len(), expected_ipv6.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv6.iter()) {
-            let split: Vec<String> = expected_line.split(' ').map(|s| s.to_owned()).collect();
+            let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
             let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }

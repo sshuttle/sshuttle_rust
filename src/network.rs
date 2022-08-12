@@ -135,7 +135,7 @@ impl Subnets {
                     cidr: s.cidr,
                     ports: s.ports,
                 }),
-                _ => None,
+                IpAddr::V6(_) => None,
             })
             .collect();
         SubnetsV4(subnets)
@@ -151,7 +151,7 @@ impl Subnets {
                     cidr: s.cidr,
                     ports: s.ports,
                 }),
-                _ => None,
+                IpAddr::V4(_) => None,
             })
             .collect();
         SubnetsV6(subnets)
@@ -186,8 +186,8 @@ impl FromStr for Subnets {
 
         let host = caps[1].to_string();
         let cidr = caps.get(2).map(parse_int).transpose()?;
-        let fport = caps.get(3).map(parse_int).transpose()?;
-        let lport = caps.get(4).map(parse_int).transpose()?;
+        let first_port = caps.get(3).map(parse_int).transpose()?;
+        let last_port = caps.get(4).map(parse_int).transpose()?;
 
         let addrinfo: Result<Vec<dns_lookup::AddrInfo>, std::io::Error> =
             getaddrinfo(Some(host.as_str()), None, None)
@@ -246,11 +246,10 @@ impl FromStr for Subnets {
                     )));
                 };
 
-                let ports = match (fport, lport) {
+                let ports = match (first_port, last_port) {
                     (None, None) => Ports::None,
-                    (None, Some(port)) => Ports::Single(port),
-                    (Some(port), None) => Ports::Single(port),
-                    (Some(fport), Some(lport)) => Ports::Range(fport, lport),
+                    (None, Some(port)) | (Some(port), None) => Ports::Single(port),
+                    (Some(first), Some(last)) => Ports::Range(first, last),
                 };
 
                 Ok(Subnet {
@@ -295,7 +294,7 @@ impl FromStr for SubnetsV4 {
                     cidr: s.cidr,
                     ports: s.ports,
                 }),
-                _ => Err(NetworkParseError::InputError(format!(
+                IpAddr::V6(_) => Err(NetworkParseError::InputError(format!(
                     "Invalid family, expected IPv4: {:?}",
                     s
                 ))),
@@ -331,7 +330,7 @@ impl FromStr for SubnetsV6 {
                     cidr: s.cidr,
                     ports: s.ports,
                 }),
-                _ => Err(NetworkParseError::InputError(format!(
+                IpAddr::V4(_) => Err(NetworkParseError::InputError(format!(
                     "Invalid family, expected IPv6: {:?}",
                     s
                 ))),
@@ -410,7 +409,7 @@ mod tests {
 
     #[test]
     fn test_parse_subnetport_ip4() {
-        for (s, ip4) in IP4_REPRS.into_iter() {
+        for (s, ip4) in IP4_REPRS {
             let subnets = Subnets::from_str(s).unwrap();
             assert_eq!(subnets.0.len(), 1);
             assert!(matches!(subnets.0[0].address, IpAddr::V4(_)));
@@ -426,7 +425,7 @@ mod tests {
 
     #[test]
     fn test_parse_subnetport_ip4_with_mask() {
-        for (s, ip4) in IP4_REPRS.into_iter() {
+        for (s, ip4) in IP4_REPRS {
             for width in IP4_SWIDTHS {
                 let s = format!("{s}/{width}");
                 let subnets = Subnets::from_str(&s).unwrap();
@@ -445,7 +444,7 @@ mod tests {
 
     #[test]
     fn test_parse_subnetport_ip4_with_port() {
-        for (s, ip4) in IP4_REPRS.into_iter() {
+        for (s, ip4) in IP4_REPRS {
             let s = format!("{s}:80");
             let subnets = Subnets::from_str(&s).unwrap();
             assert_eq!(subnets.0.len(), 1);
@@ -455,7 +454,7 @@ mod tests {
             assert_eq!(subnets.0[0].ports, Ports::Single(80));
         }
 
-        for (s, ip4) in IP4_REPRS.into_iter() {
+        for (s, ip4) in IP4_REPRS {
             let s = format!("{s}:80-90");
             let subnets = Subnets::from_str(&s).unwrap();
             assert_eq!(subnets.0.len(), 1);
@@ -468,7 +467,7 @@ mod tests {
 
     #[test]
     fn test_parse_subnetport_ip4_with_port_and_mask() {
-        for (s, ip4) in IP4_REPRS.into_iter() {
+        for (s, ip4) in IP4_REPRS {
             let s = format!("{s}/32:80");
             let subnets = Subnets::from_str(&s).unwrap();
             assert_eq!(subnets.0.len(), 1);
@@ -478,7 +477,7 @@ mod tests {
             assert_eq!(subnets.0[0].ports, Ports::Single(80));
         }
 
-        for (s, ip4) in IP4_REPRS.into_iter() {
+        for (s, ip4) in IP4_REPRS {
             let s = format!("{s}/16:80-90");
             let subnets = Subnets::from_str(&s).unwrap();
             assert_eq!(subnets.0.len(), 1);
@@ -500,7 +499,7 @@ mod tests {
 
     #[test]
     fn test_parse_subnetport_ip6() {
-        for (s, ip6) in IP6_REPRS.into_iter() {
+        for (s, ip6) in IP6_REPRS {
             let subnets = Subnets::from_str(s).unwrap();
             assert_eq!(subnets.0.len(), 1);
             assert!(matches!(subnets.0[0].address, IpAddr::V6(_)));
@@ -512,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_parse_subnetport_ip6_with_mask() {
-        for (s, ip6) in IP6_REPRS.into_iter() {
+        for (s, ip6) in IP6_REPRS {
             for width in IP6_SWIDTHS {
                 let s = format!("{s}/{width}");
                 let subnets = Subnets::from_str(&s).unwrap();
@@ -531,7 +530,7 @@ mod tests {
 
     #[test]
     fn test_parse_subnetport_ip6_with_port() {
-        for (s, ip6) in IP6_REPRS.into_iter() {
+        for (s, ip6) in IP6_REPRS {
             let s = format!("[{s}]:80");
             let subnets = Subnets::from_str(&s).unwrap();
             assert_eq!(subnets.0.len(), 1);
@@ -541,7 +540,7 @@ mod tests {
             assert_eq!(subnets.0[0].ports, Ports::Single(80));
         }
 
-        for (s, ip6) in IP6_REPRS.into_iter() {
+        for (s, ip6) in IP6_REPRS {
             let s = format!("[{s}]:80-90");
             let subnets = Subnets::from_str(&s).unwrap();
             assert_eq!(subnets.0.len(), 1);
@@ -554,7 +553,7 @@ mod tests {
 
     #[test]
     fn test_parse_subnetport_ip6_with_port_and_mask() {
-        for (s, ip6) in IP6_REPRS.into_iter() {
+        for (s, ip6) in IP6_REPRS {
             let s = format!("[{s}/128]:80");
             let subnets = Subnets::from_str(&s).unwrap();
             assert_eq!(subnets.0.len(), 1);
@@ -564,7 +563,7 @@ mod tests {
             assert_eq!(subnets.0[0].ports, Ports::Single(80));
         }
 
-        for (s, ip6) in IP6_REPRS.into_iter() {
+        for (s, ip6) in IP6_REPRS {
             let s = format!("[{s}/16]:80-90");
             let subnets = Subnets::from_str(&s).unwrap();
             assert_eq!(subnets.0.len(), 1);

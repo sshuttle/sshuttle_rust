@@ -9,7 +9,7 @@ impl Commands {
         .to_string();
 
         let mut args = vec!["-w".to_string(), "-t".to_string(), table.to_string()];
-        let iter = extra.iter().map(|s| s.to_string());
+        let iter = extra.iter().map(ToString::to_string);
         args.extend(iter);
 
         self.push(CommandLine(cmd, args));
@@ -23,7 +23,7 @@ impl Commands {
         .to_string();
 
         let mut args = vec!["-w".to_string(), "-t".to_string(), table.to_string()];
-        let iter = extra.iter().map(|s| s.to_string());
+        let iter = extra.iter().map(ToString::to_string);
         args.extend(iter);
 
         self.push_ignore_errors(CommandLine(cmd, args));

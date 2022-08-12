@@ -33,18 +33,18 @@ impl TProxyFirewall {
     fn setup_family<T: SubnetsFamily>(
         &self,
         config: &FirewallConfig,
-        fconfig: &FirewallSubnetConfig<T>,
+        subnet_config: &FirewallSubnetConfig<T>,
         commands: &mut Commands,
-    ) -> Result<(), FirewallError> {
-        let port = fconfig.listener.port().to_string();
-        let protocol = match fconfig.listener.protocol {
+    ) {
+        let port = subnet_config.listener.port().to_string();
+        let protocol = match subnet_config.listener.protocol {
             Protocol::Tcp => "tcp",
             Protocol::Udp => "udp",
         };
-        let mark_chain = chain_name(&fconfig.listener, "m");
-        let tproxy_chain = chain_name(&fconfig.listener, "t");
-        let divert_chain = chain_name(&fconfig.listener, "d");
-        let family = fconfig.family();
+        let mark_chain = chain_name(&subnet_config.listener, "m");
+        let tproxy_chain = chain_name(&subnet_config.listener, "t");
+        let divert_chain = chain_name(&subnet_config.listener, "d");
+        let family = subnet_config.family();
         // FIXME
         let tmark = "0x01";
 
@@ -86,14 +86,14 @@ impl TProxyFirewall {
         ipm!("-A", &divert_chain, "-j", "ACCEPT");
         ipm!("-A", &tproxy_chain, "-m", "socket", "-j", &divert_chain, "-m", protocol, "-p", protocol);
 
-        for subnet in fconfig.excludes.iter() {
+        for subnet in subnet_config.excludes.iter() {
             let subnet_str = subnet.subnet_str();
             let ports: Vec<String> = match subnet.ports() {
                 Ports::Single(port) => vec!["--dport".to_string(), port.to_string()],
-                Ports::Range(fport,lport) => vec!["--dport".to_string(), format!("{fport}:{lport}")],
+                Ports::Range(first, last) => vec!["--dport".to_string(), format!("{first}:{last}")],
                 Ports::None => vec![],
             };
-            let ports: Vec<_> = ports.iter().map(|p| p.as_str()).collect();
+            let ports: Vec<_> = ports.iter().map(String::as_str).collect();
 
             {
                 let mut cmd = vec!["-A", &mark_chain, "-j", "RETURN", "--dest", &subnet_str, "-m", protocol, "-p", protocol];
@@ -108,14 +108,14 @@ impl TProxyFirewall {
             }
         }
 
-        for subnet in fconfig.includes.iter() {
+        for subnet in subnet_config.includes.iter() {
             let subnet_str = subnet.subnet_str();
             let ports: Vec<String> = match subnet.ports() {
                 Ports::Single(port) => vec!["--dport".to_string(), port.to_string()],
-                Ports::Range(fport,lport) => vec!["--dport".to_string(), format!("{fport}:{lport}")],
+                Ports::Range(first, last) => vec!["--dport".to_string(), format!("{first}:{last}")],
                 Ports::None => vec![],
             };
-            let ports: Vec<_> = ports.iter().map(|p| p.as_str()).collect();
+            let ports: Vec<_> = ports.iter().map(String::as_str).collect();
 
             {
                 let mut cmd = vec!["-A", &mark_chain, "-j", "MARK", "--set-mark", tmark, "--dest", &subnet_str, "-m", protocol, "-p", protocol];
@@ -129,23 +129,20 @@ impl TProxyFirewall {
                 ipm_vec!(cmd);
             }
         }
-
-
-        Ok(())
     }
 
     #[rustfmt::skip]
     fn restore_family<T: SubnetsFamily>(
         &self,
         config: &FirewallConfig,
-        fconfig: &FirewallSubnetConfig<T>,
+        subnet_config: &FirewallSubnetConfig<T>,
         commands: &mut Commands,
-    ) -> Result<(), FirewallError> {
-        let port = fconfig.listener.port().to_string();
-        let mark_chain = chain_name(&fconfig.listener, "m");
-        let tproxy_chain = chain_name(&fconfig.listener, "t");
-        let divert_chain = chain_name(&fconfig.listener, "d");
-        let family = fconfig.family();
+    )  {
+        let port = subnet_config.listener.port().to_string();
+        let mark_chain = chain_name(&subnet_config.listener, "m");
+        let tproxy_chain = chain_name(&subnet_config.listener, "t");
+        let divert_chain = chain_name(&subnet_config.listener, "d");
+        let family = subnet_config.family();
 
 
         macro_rules! ipm {
@@ -172,8 +169,6 @@ impl TProxyFirewall {
 
         ipm!("-F", &divert_chain);
         ipm!("-X", &divert_chain);
-
-        Ok(())
     }
 }
 
@@ -189,10 +184,11 @@ impl Firewall for TProxyFirewall {
         setsockopt(fd, IpTransparent, &true)?;
 
         let value = 1u8;
-        let value_ptr: *const libc::c_void = &value as *const u8 as *const libc::c_void;
+        let value_ptr: *const libc::c_void = std::ptr::addr_of!(value).cast::<libc::c_void>();
 
         match l.local_addr()? {
             SocketAddr::V4(_) => unsafe {
+                #[allow(clippy::cast_possible_truncation)]
                 libc::setsockopt(
                     fd,
                     libc::IPPROTO_IP,
@@ -202,6 +198,7 @@ impl Firewall for TProxyFirewall {
                 )
             },
             SocketAddr::V6(_) => unsafe {
+                #[allow(clippy::cast_possible_truncation)]
                 libc::setsockopt(
                     fd,
                     libc::IPPROTO_IPV6,
@@ -225,10 +222,10 @@ impl Firewall for TProxyFirewall {
         for family in &config.listeners {
             match family {
                 super::FirewallListenerConfig::Ipv4(ip) => {
-                    self.setup_family(config, ip, &mut commands)?
+                    self.setup_family(config, ip, &mut commands);
                 }
                 super::FirewallListenerConfig::Ipv6(ip) => {
-                    self.setup_family(config, ip, &mut commands)?
+                    self.setup_family(config, ip, &mut commands);
                 }
             }
         }
@@ -241,10 +238,10 @@ impl Firewall for TProxyFirewall {
         for family in &config.listeners {
             match family {
                 super::FirewallListenerConfig::Ipv4(ip) => {
-                    self.restore_family(config, ip, &mut commands)?
+                    self.restore_family(config, ip, &mut commands);
                 }
                 super::FirewallListenerConfig::Ipv6(ip) => {
-                    self.restore_family(config, ip, &mut commands)?
+                    self.restore_family(config, ip, &mut commands);
                 }
             }
         }
@@ -301,12 +298,10 @@ mod tests {
         ];
 
         let mut commands = Commands::default();
-        firewall
-            .setup_family(&config, &ipv4_family, &mut commands)
-            .unwrap();
+        firewall.setup_family(&config, &ipv4_family, &mut commands);
         assert_eq!(commands.len(), expected_ipv4.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv4.iter()) {
-            let split: Vec<String> = expected_line.split(' ').map(|s| s.to_owned()).collect();
+            let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
             let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
@@ -350,12 +345,10 @@ mod tests {
             "ip6tables -w -t mangle -A sshuttle-t-tcp-1024 -j TPROXY --tproxy-mark 0x01 --dest 2404:6800:4004:80c::/64 -m tcp -p tcp --on-port 1024 --dport 8000:9000",
         ];
         let mut commands = Commands::default();
-        firewall
-            .setup_family(&config, &ipv6_family, &mut commands)
-            .unwrap();
+        firewall.setup_family(&config, &ipv6_family, &mut commands);
         assert_eq!(commands.len(), expected_ipv6.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv6.iter()) {
-            let split: Vec<String> = expected_line.split(' ').map(|s| s.to_owned()).collect();
+            let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
             let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
@@ -390,12 +383,10 @@ mod tests {
         ];
 
         let mut commands = Commands::default();
-        firewall
-            .restore_family(&config, &ipv4_family, &mut commands)
-            .unwrap();
+        firewall.restore_family(&config, &ipv4_family, &mut commands);
         assert_eq!(commands.len(), expected_ipv4.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv4.iter()) {
-            let split: Vec<String> = expected_line.split(' ').map(|s| s.to_owned()).collect();
+            let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
             let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
@@ -429,12 +420,10 @@ mod tests {
         ];
 
         let mut commands = Commands::default();
-        firewall
-            .restore_family(&config, &ipv6_family, &mut commands)
-            .unwrap();
+        firewall.restore_family(&config, &ipv6_family, &mut commands);
         assert_eq!(commands.len(), expected_ipv6.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv6.iter()) {
-            let split: Vec<String> = expected_line.split(' ').map(|s| s.to_owned()).collect();
+            let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
             let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
@@ -478,12 +467,10 @@ mod tests {
         ];
 
         let mut commands = Commands::default();
-        firewall
-            .setup_family(&config, &ipv4_family, &mut commands)
-            .unwrap();
+        firewall.setup_family(&config, &ipv4_family, &mut commands);
         assert_eq!(commands.len(), expected_ipv4.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv4.iter()) {
-            let split: Vec<String> = expected_line.split(' ').map(|s| s.to_owned()).collect();
+            let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
             let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
@@ -527,12 +514,10 @@ mod tests {
             "ip6tables -w -t mangle -A sshuttle-t-udp-1024 -j TPROXY --tproxy-mark 0x01 --dest 2404:6800:4004:80c::/64 -m udp -p udp --on-port 1024 --dport 8000:9000",
         ];
         let mut commands = Commands::default();
-        firewall
-            .setup_family(&config, &ipv6_family, &mut commands)
-            .unwrap();
+        firewall.setup_family(&config, &ipv6_family, &mut commands);
         assert_eq!(commands.len(), expected_ipv6.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv6.iter()) {
-            let split: Vec<String> = expected_line.split(' ').map(|s| s.to_owned()).collect();
+            let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
             let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
@@ -567,12 +552,10 @@ mod tests {
         ];
 
         let mut commands = Commands::default();
-        firewall
-            .restore_family(&config, &ipv4_family, &mut commands)
-            .unwrap();
+        firewall.restore_family(&config, &ipv4_family, &mut commands);
         assert_eq!(commands.len(), expected_ipv4.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv4.iter()) {
-            let split: Vec<String> = expected_line.split(' ').map(|s| s.to_owned()).collect();
+            let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
             let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
@@ -606,12 +589,10 @@ mod tests {
         ];
 
         let mut commands = Commands::default();
-        firewall
-            .restore_family(&config, &ipv6_family, &mut commands)
-            .unwrap();
+        firewall.restore_family(&config, &ipv6_family, &mut commands);
         assert_eq!(commands.len(), expected_ipv6.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv6.iter()) {
-            let split: Vec<String> = expected_line.split(' ').map(|s| s.to_owned()).collect();
+            let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
             let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
