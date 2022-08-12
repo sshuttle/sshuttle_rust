@@ -41,3 +41,10 @@ sudo RUST_LOG=trace SSH_AUTH_SOCK="$SSH_AUTH_SOCK" sshuttle_rust --remote user@h
 This will create a ssh connection to "use@host.example.org" using "-D" and forward all connections to port 443. By default ssh is configured with `-D 127.0.0.1:1080`, the socks address can be changed with the `--socks` option.
 
 If you omit the `--remote` option it will not start ssh, but try to connect to an existing socks server at the address given by the `--socks` option.
+
+Alternative, possibly better usage:
+
+```sh
+ssh -D1080 -N user@host.example.org
+sudo RUST_LOG=trace SSH_AUTH_SOCK="$SSH_AUTH_SOCK" sshuttle_rust --socks 127.0.0.1:1080 --listen 127.0.0.1:1021  --listen '[::1]:1022' 0.0.0.0/0:443 '[::/0]:443'
+```
