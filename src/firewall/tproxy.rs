@@ -25,7 +25,7 @@ fn chain_name(listener: &ListenerAddr, name: &str) -> String {
 }
 
 impl TProxyFirewall {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         TProxyFirewall {}
     }
 

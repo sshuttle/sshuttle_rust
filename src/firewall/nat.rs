@@ -8,7 +8,7 @@ use super::{Commands, Firewall, FirewallConfig, FirewallError, FirewallSubnetCon
 pub struct NatFirewall {}
 
 impl NatFirewall {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         NatFirewall {}
     }
 
