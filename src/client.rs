@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::IoSliceMut;
 use std::net::SocketAddr;
 use std::net::{IpAddr, UdpSocket};
-use std::os::unix::prelude::AsRawFd;
+use std::os::unix::prelude::{AsRawFd, FromRawFd};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,7 +20,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinError;
-use tokio::time::sleep;
+use tokio::time::{sleep, Instant};
 use tokio::{process::Command, spawn, task::JoinHandle};
 
 use crate::command::CommandError;
@@ -376,6 +376,16 @@ async fn listen_tcp(
     Ok(())
 }
 
+#[derive(Debug)]
+enum UdpMessage {
+    Packet(SocketAddr, Vec<u8>),
+}
+
+struct UdpState {
+    tx: mpsc::Sender<UdpMessage>,
+    last_packet: Instant,
+}
+
 async fn listen_udp(
     firewall: &Arc<dyn Firewall + Send + Sync>,
     l_addr: ListenerAddr,
@@ -384,7 +394,7 @@ async fn listen_udp(
     let _firewall = Arc::clone(firewall);
 
     let listener = UdpSocket::bind(l_addr.addr)?;
-    let receive = listener.as_raw_fd();
+    let fd = listener.as_raw_fd();
 
     // let s: SockAddr = l_addr.addr.clone().into();
     // let s: dyn SockaddrLike = match l_addr.ip() {
@@ -401,35 +411,77 @@ async fn listen_udp(
     // )
     // .expect("creating socket failed");
 
-    setsockopt(receive, IpTransparent, &true).unwrap();
+    setsockopt(fd, IpTransparent, &true).unwrap();
     match l_addr.ip() {
         IpAddr::V4(_) => {
-            setsockopt(receive, Ipv4OrigDstAddr, &true).expect("setsockopt Ipv4OrigDstAddr failed");
+            setsockopt(fd, Ipv4OrigDstAddr, &true).expect("setsockopt Ipv4OrigDstAddr failed");
         }
         IpAddr::V6(_) => {
-            setsockopt(receive, Ipv6OrigDstAddr, &true).expect("setsockopt Ipv6OrigDstAddr failed");
+            setsockopt(fd, Ipv6OrigDstAddr, &true).expect("setsockopt Ipv6OrigDstAddr failed");
         }
     }
 
     tokio::spawn(async move {
         let receive = listener.as_raw_fd();
-        let mut socks: HashMap<SocketAddr, Socks5Datagram<TcpStream>> = HashMap::new();
+        let mut index: HashMap<SocketAddr, UdpState> = HashMap::new();
+        // let mut index: HashMap<SocketAddr, usize> = HashMap::new();
+        // let mut socks: Vec<Socks5Datagram<TcpStream>> = Vec::new();
+        // let mut buffers: Vec<RefCell<Vec<u8>>> = Vec::new();
+        let l_addr = l_addr;
+
+        // let mut operation = Box::pin(recv_udp(&l_addr, receive));
+        // tokio::pin!(operation);
 
         loop {
             let l_addr = l_addr.clone();
             println!("{l_addr} UDP waiting");
-            let (local_addr, remote_addr, bytes) = recv_udp(&l_addr, receive).await.unwrap();
-            println!("{l_addr} {local_addr:?} {remote_addr:?} UDP {bytes:?}");
 
-            if let Some(socks5) = socks.get_mut(&local_addr) {
-                socks5.send_to(&bytes, remote_addr).await.unwrap();
+            // // let refcell = RefCell::new(buf);
+            // let flist = socks.iter().map(|s| {
+            //     let mut buf = Vec::with_capacity(1024);
+            //     unsafe { buf.set_len(1024) };
+            //     let future = s.recv_from(&mut buf);
+            //     // Box::pin(future)
+            //     // tokio::pin!(future);
+            //     future
+            // });
+            // let x = futures::future::select_all(flist);
+
+            // tokio::select! {
+            //     udp = &mut operation => {
+            //         let (local_address, remote_address, bytes) = udp.unwrap();
+            //         println!("{l_addr} UDP operation");
+            //         let l_addr = l_addr.clone();
+            //         operation = Box::pin(recv_udp(l_addr, receive));
+            //         // tokio::pin!(operation);
+            //     },
+            //     // _ = futures::future::select_all(flist) => {
+            //     //     break;
+            //     // }
+            // }
+            let (local_addr, remote_addr, bytes) = recv_udp(&l_addr, receive).await.unwrap();
+            // println!("{l_addr} {local_addr:?} {remote_addr:?} UDP {bytes:?}");
+
+            if let Some(state) = index.get_mut(&local_addr) {
+                let message = UdpMessage::Packet(remote_addr, bytes);
+                state.last_packet = Instant::now();
+                state.tx.send(message).await.unwrap();
             } else {
-                let backing_socket = TcpStream::connect(socks_addr).await.unwrap();
-                let socks5 = Socks5Datagram::bind(backing_socket, "[::]:0")
-                    .await
-                    .unwrap();
-                socks5.send_to(&bytes, remote_addr).await.unwrap();
-                socks.insert(local_addr, socks5);
+                let (tx, rx) = mpsc::channel(1);
+
+                tokio::spawn(async move {
+                    handle_udp_client(fd, rx, socks_addr).await;
+                });
+
+                let message = UdpMessage::Packet(remote_addr, bytes);
+                tx.send(message).await.unwrap();
+
+                let state = UdpState {
+                    tx,
+                    last_packet: Instant::now(),
+                };
+
+                index.insert(local_addr, state);
             }
         }
     });
@@ -540,6 +592,43 @@ async fn handle_tcp_client(
     // let result = my_bidirectional_copy(&mut local, &mut remote).await;
 
     log::debug!("copy_bidirectional result: {:?}", result);
+}
+
+async fn handle_udp_client(fd: i32, mut rx: mpsc::Receiver<UdpMessage>, socks_addr: SocketAddr) {
+    let socket = unsafe { UdpSocket::from_raw_fd(fd) };
+    let backing_socket = TcpStream::connect(socks_addr).await.unwrap();
+    let socks5 = Socks5Datagram::bind(backing_socket, "[::]:0")
+        .await
+        .unwrap();
+
+    let mut buffer = [0u8; 1024];
+    loop {
+        select! {
+            Some(msg) = rx.recv() => {
+                match msg {
+                    UdpMessage::Packet(remote_addr, bytes) => {
+                        log::info!("{} sending packet {:?} for {}", socks_addr, bytes, remote_addr);
+                        socks5.send_to(&bytes, remote_addr).await.unwrap();
+                    }
+                }
+            },
+            result = socks5.recv_from(&mut buffer) => {
+                match result {
+                    Ok((bytes, remote_addr)) => {
+                        log::info!("{} received packet {:?} from {}", socks_addr, &buffer[0..bytes], remote_addr);
+                        socket.send_to(&buffer[0..bytes], remote_addr).unwrap();
+                    }
+                    Err(e) => {
+                        log::error!("socks5 error: {:?}", e);
+                    }
+                }
+            },
+            else => {
+                log::info!("udp done");
+                break;
+            }
+        }
+    }
 }
 
 // async fn my_bidirectional_copy(
