@@ -1,13 +1,11 @@
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::unix::prelude::AsRawFd,
-};
+use std::{net::SocketAddr, os::unix::prelude::AsRawFd};
 
 use nix::{
     errno::Errno,
     sys::socket::{
         getsockopt,
         sockopt::{Ip6tOriginalDst, OriginalDst},
+        SockaddrIn, SockaddrIn6, SockaddrLike,
     },
 };
 use thiserror::Error;
@@ -32,6 +30,9 @@ pub enum FirewallError {
 
     #[error("Not supported `{0}`")]
     NotSupported(String),
+
+    #[error("Cannot get destination address")]
+    CannotGetDstAddress,
 }
 
 fn get_dst_addr_sockopt(s: &TcpStream) -> Result<SocketAddr, FirewallError> {
@@ -45,24 +46,19 @@ fn get_dst_addr_sockopt(s: &TcpStream) -> Result<SocketAddr, FirewallError> {
             raw_to_socket_addr_v6(a)
         }
     };
-    Ok(addr)
+    addr.ok_or(FirewallError::CannotGetDstAddress)
 }
 
-fn raw_to_socket_addr_v4(a: libc::sockaddr_in) -> SocketAddr {
-    let addr = Ipv4Addr::from(u32::from_be(a.sin_addr.s_addr));
-    let port = a.sin_port.to_be();
-    SocketAddr::new(IpAddr::V4(addr), port)
+fn raw_to_socket_addr_v4(a: libc::sockaddr_in) -> Option<SocketAddr> {
+    let a_ptr: *const libc::sockaddr = std::ptr::addr_of!(a).cast();
+    let addr = unsafe { SockaddrIn::from_raw(a_ptr, None) };
+    addr.map(|a| SocketAddr::V4(a.into()))
 }
 
-fn raw_to_socket_addr_v6(a: libc::sockaddr_in6) -> SocketAddr {
-    let mut b = a.sin6_addr.s6_addr;
-    let u16 = unsafe { std::slice::from_raw_parts_mut(b.as_mut_ptr().cast::<u8>(), 8) };
-    for i in u16.iter_mut() {
-        *i = i.to_be();
-    }
-    let addr = Ipv6Addr::from(b);
-    let port = a.sin6_port.to_be();
-    SocketAddr::new(IpAddr::V6(addr), port)
+fn raw_to_socket_addr_v6(a: libc::sockaddr_in6) -> Option<SocketAddr> {
+    let a_ptr: *const libc::sockaddr = std::ptr::addr_of!(a).cast();
+    let addr = unsafe { SockaddrIn6::from_raw(a_ptr, None) };
+    addr.map(|a| SocketAddr::V6(a.into()))
 }
 
 pub trait Firewall {
