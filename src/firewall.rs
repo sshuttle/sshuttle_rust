@@ -2,6 +2,7 @@ use std::{net::SocketAddr, os::unix::prelude::AsRawFd};
 
 use nix::{
     errno::Errno,
+    libc::{sockaddr, sockaddr_in, sockaddr_in6},
     sys::socket::{
         getsockopt,
         sockopt::{Ip6tOriginalDst, OriginalDst},
@@ -49,14 +50,14 @@ fn get_dst_addr_sockopt(s: &TcpStream) -> Result<SocketAddr, FirewallError> {
     addr.ok_or(FirewallError::CannotGetDstAddress)
 }
 
-fn raw_to_socket_addr_v4(a: libc::sockaddr_in) -> Option<SocketAddr> {
-    let a_ptr: *const libc::sockaddr = std::ptr::addr_of!(a).cast();
+fn raw_to_socket_addr_v4(a: sockaddr_in) -> Option<SocketAddr> {
+    let a_ptr: *const sockaddr = std::ptr::addr_of!(a).cast();
     let addr = unsafe { SockaddrIn::from_raw(a_ptr, None) };
     addr.map(|a| SocketAddr::V4(a.into()))
 }
 
-fn raw_to_socket_addr_v6(a: libc::sockaddr_in6) -> Option<SocketAddr> {
-    let a_ptr: *const libc::sockaddr = std::ptr::addr_of!(a).cast();
+fn raw_to_socket_addr_v6(a: sockaddr_in6) -> Option<SocketAddr> {
+    let a_ptr: *const sockaddr = std::ptr::addr_of!(a).cast();
     let addr = unsafe { SockaddrIn6::from_raw(a_ptr, None) };
     addr.map(|a| SocketAddr::V6(a.into()))
 }
