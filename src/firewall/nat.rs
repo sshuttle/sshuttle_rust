@@ -159,7 +159,7 @@ impl Firewall for NatFirewall {
         Ok(commands)
     }
     fn restore_firewall(&self, config: &FirewallConfig) -> Result<Commands, FirewallError> {
-        let mut commands: Commands = Commands::default();
+        let mut commands: Commands = Commands::new();
 
         for family in &config.listeners {
             match family {
@@ -180,7 +180,7 @@ impl Firewall for NatFirewall {
 #[cfg(test)]
 mod tests {
     use crate::{
-        command::CommandLine,
+        command::Line,
         network::{ListenerAddr, SubnetsV4, SubnetsV6},
     };
 
@@ -220,7 +220,7 @@ mod tests {
         assert_eq!(commands.len(), expected_ipv4.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv4.iter()) {
             let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
-            let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
+            let expected_command = Line(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
     }
@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(commands.len(), expected_ipv6.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv6.iter()) {
             let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
-            let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
+            let expected_command = Line(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
     }
@@ -294,7 +294,7 @@ mod tests {
         assert_eq!(commands.len(), expected_ipv4.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv4.iter()) {
             let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
-            let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
+            let expected_command = Line(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
     }
@@ -329,7 +329,7 @@ mod tests {
         assert_eq!(commands.len(), expected_ipv6.len());
         for (command, expected_line) in commands.iter().zip(expected_ipv6.iter()) {
             let split: Vec<String> = expected_line.split(' ').map(ToOwned::to_owned).collect();
-            let expected_command = CommandLine(split[0].clone(), split[1..].to_vec());
+            let expected_command = Line(split[0].clone(), split[1..].to_vec());
             assert_eq!(command.line, expected_command);
         }
     }

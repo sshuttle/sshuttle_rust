@@ -1,10 +1,10 @@
 use std::slice::Iter;
 
-use crate::command::{CommandError, CommandErrorKind, CommandLine};
+use crate::command::{Error, ErrorKind, Line};
 
 #[derive(Debug)]
 pub struct Command {
-    pub line: CommandLine,
+    pub line: Line,
     pub ignore_errors: bool,
 }
 
@@ -12,10 +12,14 @@ pub struct Command {
 pub struct Commands(Vec<Command>);
 
 impl Commands {
-    pub async fn run_all(&self) -> Result<(), CommandError> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn run_all(&self) -> Result<(), Error> {
         for cmd in &self.0 {
             if let Err(err) = cmd.line.run().await {
-                if let CommandErrorKind::BadExitCode { .. } = err.kind {
+                if let ErrorKind::BadExitCode { .. } = err.kind {
                     if cmd.ignore_errors {
                         log::info!("Ignoring error: {}", err);
                     } else {
@@ -39,14 +43,14 @@ impl Commands {
         self.0.iter()
     }
 
-    pub fn push(&mut self, line: CommandLine) {
+    pub fn push(&mut self, line: Line) {
         self.0.push(Command {
             line,
             ignore_errors: false,
         });
     }
 
-    pub fn push_ignore_errors(&mut self, line: CommandLine) {
+    pub fn push_ignore_errors(&mut self, line: Line) {
         self.0.push(Command {
             line,
             ignore_errors: true,

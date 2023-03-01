@@ -1,4 +1,4 @@
-use crate::{command::CommandLine, commands::Commands, network::Family};
+use crate::{command::Line, commands::Commands, network::Family};
 
 impl Commands {
     pub fn ipt(&mut self, family: Family, table: &str, extra: &[&str]) {
@@ -8,11 +8,10 @@ impl Commands {
         }
         .to_string();
 
-        let mut args = vec!["-w".to_string(), "-t".to_string(), table.to_string()];
-        let iter = extra.iter().map(ToString::to_string);
-        args.extend(iter);
+        let mut args = vec!["-w", "-t", table];
+        args.extend(extra);
 
-        self.push(CommandLine(cmd, args));
+        self.push(Line::new(cmd, args));
     }
 
     pub fn ipt_ignore_errors(&mut self, family: Family, table: &str, extra: &[&str]) {
@@ -22,10 +21,9 @@ impl Commands {
         }
         .to_string();
 
-        let mut args = vec!["-w".to_string(), "-t".to_string(), table.to_string()];
-        let iter = extra.iter().map(ToString::to_string);
-        args.extend(iter);
+        let mut args = vec!["-w", "-t", table];
+        args.extend(extra);
 
-        self.push_ignore_errors(CommandLine(cmd, args));
+        self.push_ignore_errors(Line::new(cmd, args));
     }
 }

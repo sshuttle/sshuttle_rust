@@ -2,33 +2,40 @@
 //!
 //! This will run a Unix command, and keep track of stdout, stderr, and any errors.
 
+use log::info;
 use std::{
-    error::Error,
+    error,
     fmt::Display,
     process::{Output, Stdio},
+    result,
     str::{self, Utf8Error},
     time::{Duration, Instant},
 };
 use tokio::{io, process::Command};
 
-use crate::duration::duration_string;
+pub fn duration_string(duration: &Duration) -> String {
+    let seconds = duration.as_secs() % 60;
+    let minutes = (duration.as_secs() / 60) % 60;
+    let hours = (duration.as_secs() / 60) / 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
 
 #[derive(Debug)]
-pub struct CommandSuccess {
-    pub cmd: CommandLine,
+pub struct Success {
+    pub cmd: Line,
     pub stdout: String,
     pub stderr: String,
     pub duration: Duration,
 }
 
-impl CommandSuccess {
+impl Success {
     #[allow(clippy::unused_self)]
     pub fn result_line(&self) -> String {
         "Command was successful".to_string()
     }
 }
 
-impl Display for CommandSuccess {
+impl Display for Success {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let summary = self.result_line();
 
@@ -57,39 +64,39 @@ impl Display for CommandSuccess {
 }
 
 #[derive(Debug)]
-pub struct CommandError {
-    pub cmd: CommandLine,
+pub struct Error {
+    pub cmd: Line,
     pub stdout: String,
     pub stderr: String,
     pub duration: Duration,
     pub exit_code: i32,
-    pub kind: CommandErrorKind,
+    pub kind: ErrorKind,
 }
 
 #[derive(Debug)]
-pub enum CommandErrorKind {
-    BadExitCode {},
+pub enum ErrorKind {
+    BadExitCode,
     FailedToStart { err: std::io::Error },
     Utf8Error { err: Utf8Error },
 }
 
-impl From<Utf8Error> for CommandErrorKind {
+impl From<Utf8Error> for ErrorKind {
     fn from(err: Utf8Error) -> Self {
-        CommandErrorKind::Utf8Error { err }
+        Self::Utf8Error { err }
     }
 }
 
-impl CommandError {
+impl Error {
     pub fn result_line(&self) -> String {
         match &self.kind {
-            CommandErrorKind::BadExitCode {} => format!("Bad Exit code {}", self.exit_code),
-            CommandErrorKind::FailedToStart { err } => format!("Failed to start: {err}"),
-            CommandErrorKind::Utf8Error { err } => format!("UTF-8 error: {err}"),
+            ErrorKind::BadExitCode {} => format!("Bad Exit code {}", self.exit_code),
+            ErrorKind::FailedToStart { err } => format!("Failed to start: {err}"),
+            ErrorKind::Utf8Error { err } => format!("UTF-8 error: {err}"),
         }
     }
 }
 
-impl Display for CommandError {
+impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let summary = self.result_line();
 
@@ -117,20 +124,22 @@ impl Display for CommandError {
     }
 }
 
-impl Error for CommandError {}
+impl error::Error for Error {}
 
-pub type CommandResult = Result<CommandSuccess, CommandError>;
+pub type Result = result::Result<Success, Error>;
 
 #[derive(Clone, Eq, PartialEq)]
-pub struct CommandLine(pub String, pub Vec<String>);
+pub struct Line(pub String, pub Vec<String>);
 
-fn get_exit_code(output: &Result<Output, io::Error>) -> i32 {
+fn get_exit_code(output: &result::Result<Output, io::Error>) -> i32 {
     output
         .as_ref()
         .map_or(-1, |output| output.status.code().unwrap_or(-1))
 }
 
-fn get_stdin_out(output: &Result<Output, io::Error>) -> Result<(String, String), CommandErrorKind> {
+fn get_stdin_out(
+    output: &result::Result<Output, io::Error>,
+) -> result::Result<(String, String), ErrorKind> {
     if let Ok(output) = &output {
         let stdin = str::from_utf8(&output.stdout)?;
         let stderr = str::from_utf8(&output.stderr)?;
@@ -140,11 +149,18 @@ fn get_stdin_out(output: &Result<Output, io::Error>) -> Result<(String, String),
     }
 }
 
-impl CommandLine {
-    pub async fn run(&self) -> CommandResult {
-        let start = Instant::now();
+impl Line {
+    pub fn new(cmd: impl Into<String>, args: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        let cmd = cmd.into();
+        let args = args.into_iter().map(std::convert::Into::into).collect();
+        Self(cmd, args)
+    }
 
-        let CommandLine(cmd, args) = &self;
+    pub async fn run(&self) -> Result {
+        let start = Instant::now();
+        info!("Running command: {self}");
+
+        let Self(cmd, args) = &self;
         let output = Command::new(cmd)
             .args(args)
             .stdin(Stdio::null())
@@ -159,7 +175,7 @@ impl CommandLine {
         let (stdout, stderr) = match get_stdin_out(&output) {
             Ok(output) => output,
             Err(err) => {
-                return Err(CommandError {
+                return Err(Error {
                     cmd: self.clone(),
                     stdout: String::new(),
                     stderr: String::new(),
@@ -171,24 +187,24 @@ impl CommandLine {
         };
 
         let kind = match output {
-            Err(err) => Err(CommandErrorKind::FailedToStart { err }),
+            Err(err) => Err(ErrorKind::FailedToStart { err }),
             Ok(output) => {
                 if output.status.success() {
                     Ok(())
                 } else {
-                    Err(CommandErrorKind::BadExitCode {})
+                    Err(ErrorKind::BadExitCode {})
                 }
             }
         };
 
         match kind {
-            Ok(()) => Ok(CommandSuccess {
+            Ok(()) => Ok(Success {
                 cmd: self.clone(),
                 stdout,
                 stderr,
                 duration,
             }),
-            Err(kind) => Err(CommandError {
+            Err(kind) => Err(Error {
                 cmd: self.clone(),
                 stdout,
                 stderr,
@@ -200,7 +216,7 @@ impl CommandLine {
     }
 }
 
-impl Display for CommandLine {
+impl Display for Line {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)?;
         for arg in &self.1 {
@@ -210,7 +226,7 @@ impl Display for CommandLine {
     }
 }
 
-impl std::fmt::Debug for CommandLine {
+impl std::fmt::Debug for Line {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "CommandLine(\"{}", self.0)?;
         for arg in &self.1 {

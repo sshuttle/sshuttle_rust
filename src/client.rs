@@ -16,7 +16,7 @@ use tokio::task::JoinError;
 use tokio::time::sleep;
 use tokio::{process::Command, spawn, task::JoinHandle};
 
-use crate::command::CommandError;
+use crate::command::Error;
 use crate::firewall::{
     Firewall, FirewallConfig, FirewallError, FirewallListenerConfig, FirewallSubnetConfig,
 };
@@ -41,7 +41,7 @@ pub enum ClientError {
     Join(#[from] JoinError),
 
     #[error("Command Error `{0}`")]
-    Command(#[from] CommandError),
+    Command(#[from] Error),
 
     #[error("IO Error `{0}`")]
     Io(#[from] std::io::Error),

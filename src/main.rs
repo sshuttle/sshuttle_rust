@@ -20,8 +20,6 @@ mod options;
 mod command;
 mod commands;
 
-mod duration;
-
 mod firewall;
 
 mod linux;
