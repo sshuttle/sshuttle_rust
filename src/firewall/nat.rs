@@ -26,7 +26,7 @@ impl NatFirewall {
         }
 
         let port = subnet_config.listener.port().to_string();
-        let chain = format!("sshuttle-{}", port);
+        let chain = format!("sshuttle-{port}");
         let family = subnet_config.family();
 
         macro_rules! ipt {
@@ -109,7 +109,7 @@ impl NatFirewall {
         }
 
         let port = subnet_config.listener.port().to_string();
-        let chain = format!("sshuttle-{}", port);
+        let chain = format!("sshuttle-{port}");
         let family = subnet_config.family();
 
         macro_rules! ipt {

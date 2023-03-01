@@ -125,11 +125,9 @@ pub type CommandResult = Result<CommandSuccess, CommandError>;
 pub struct CommandLine(pub String, pub Vec<String>);
 
 fn get_exit_code(output: &Result<Output, io::Error>) -> i32 {
-    if let Ok(output) = &output {
-        output.status.code().unwrap_or(-1)
-    } else {
-        -1
-    }
+    output
+        .as_ref()
+        .map_or(-1, |output| output.status.code().unwrap_or(-1))
 }
 
 fn get_stdin_out(output: &Result<Output, io::Error>) -> Result<(String, String), CommandErrorKind> {
@@ -138,7 +136,7 @@ fn get_stdin_out(output: &Result<Output, io::Error>) -> Result<(String, String),
         let stderr = str::from_utf8(&output.stderr)?;
         Ok((stdin.to_string(), stderr.to_string()))
     } else {
-        Ok(("".to_string(), "".to_string()))
+        Ok((String::new(), String::new()))
     }
 }
 
@@ -163,8 +161,8 @@ impl CommandLine {
             Err(err) => {
                 return Err(CommandError {
                     cmd: self.clone(),
-                    stdout: "".to_string(),
-                    stderr: "".to_string(),
+                    stdout: String::new(),
+                    stderr: String::new(),
                     exit_code,
                     duration,
                     kind: err,
@@ -206,7 +204,7 @@ impl Display for CommandLine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)?;
         for arg in &self.1 {
-            write!(f, " {}", arg)?;
+            write!(f, " {arg}")?;
         }
         Ok(())
     }
@@ -216,7 +214,7 @@ impl std::fmt::Debug for CommandLine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "CommandLine(\"{}", self.0)?;
         for arg in &self.1 {
-            write!(f, " {}", arg)?;
+            write!(f, " {arg}")?;
         }
         write!(f, "\")")?;
         Ok(())

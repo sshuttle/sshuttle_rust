@@ -180,9 +180,9 @@ impl FromStr for Subnets {
         };
 
         let re = regex::Regex::new(rx)?;
-        let caps = re.captures(s).ok_or_else(|| {
-            NetworkParseError::InputError(format!("Invalid subnet format: {}", s))
-        })?;
+        let caps = re
+            .captures(s)
+            .ok_or_else(|| NetworkParseError::InputError(format!("Invalid subnet format: {s}")))?;
 
         let host = caps[1].to_string();
         let cidr = caps.get(2).map(parse_int).transpose()?;
@@ -194,13 +194,7 @@ impl FromStr for Subnets {
                 .map_err(|err| {
                     NetworkParseError::InputError(format!("Invalid hostname {host}: {err:?}"))
                 })?
-                .filter(|a| {
-                    if let Ok(b) = a {
-                        b.socktype == STREAM
-                    } else {
-                        true
-                    }
-                })
+                .filter(|a| a.as_ref().map_or(true, |b| b.socktype == STREAM))
                 .collect();
         let addrinfo = addrinfo?;
 
@@ -233,16 +227,12 @@ impl FromStr for Subnets {
                     std::net::SocketAddr::V6(_) => 128,
                 };
 
-                let cidr_to_use = match cidr {
-                    Some(cidr) => cidr,
-                    None => max_cidr,
-                };
+                let cidr_to_use = cidr.map_or(max_cidr, |cidr| cidr);
 
                 if cidr_to_use > max_cidr {
                     return Err(NetworkParseError::InputError(format!(
-                        "Invalid CIDR mask: {}. Valid CIDR masks \
-                            are between 0 and {}.",
-                        cidr_to_use, max_cidr
+                        "Invalid CIDR mask: {cidr_to_use}. Valid CIDR masks \
+                            are between 0 and {max_cidr}."
                     )));
                 };
 
@@ -295,8 +285,7 @@ impl FromStr for SubnetsV4 {
                     ports: s.ports,
                 }),
                 IpAddr::V6(_) => Err(NetworkParseError::InputError(format!(
-                    "Invalid family, expected IPv4: {:?}",
-                    s
+                    "Invalid family, expected IPv4: {s:?}"
                 ))),
             })
             .collect();
@@ -331,8 +320,7 @@ impl FromStr for SubnetsV6 {
                     ports: s.ports,
                 }),
                 IpAddr::V4(_) => Err(NetworkParseError::InputError(format!(
-                    "Invalid family, expected IPv6: {:?}",
-                    s
+                    "Invalid family, expected IPv6: {s:?}"
                 ))),
             })
             .collect();
